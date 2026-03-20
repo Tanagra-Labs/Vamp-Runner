@@ -10,7 +10,7 @@ const MAP_ROWS = 30;
 const MAP_W = MAP_COLS * TILE;
 const MAP_H = MAP_ROWS * TILE;
 
-const PLAYER_SPEED = 160;
+const PLAYER_SPEED = 200;
 const SUNRISE_DURATION = 90; // seconds
 const GARLIC_HITS_PER_LIFE = 3;
 const MAX_LIVES = 3;
@@ -375,8 +375,11 @@ class GameScene extends Phaser.Scene {
       .setScrollFactor(0).setDepth(16).setVisible(false);
 
     this.input.on('pointerdown', (p) => {
-      // Only left half of screen for joystick
-      if (p.x < GAME_W / 2 && !this.joystick.active) {
+      if (this.gameOver) {
+        this.scene.restart();
+        return;
+      }
+      if (!this.joystick.active) {
         this.joystick.active = true;
         this.joystick.pointerId = p.id;
         this.joystick.baseX = p.x;
@@ -393,13 +396,13 @@ class GameScene extends Phaser.Scene {
         const dx = p.x - this.joystick.baseX;
         const dy = p.y - this.joystick.baseY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const maxR = 40;
+        const maxR = 55;
         const clamped = Math.min(dist, maxR);
         const angle = Math.atan2(dy, dx);
         this.joystick.stickX = this.joystick.baseX + Math.cos(angle) * clamped;
         this.joystick.stickY = this.joystick.baseY + Math.sin(angle) * clamped;
-        this.joystick.dx = dist > 8 ? Math.cos(angle) : 0;
-        this.joystick.dy = dist > 8 ? Math.sin(angle) : 0;
+        this.joystick.dx = dist > 4 ? Math.cos(angle) : 0;
+        this.joystick.dy = dist > 4 ? Math.sin(angle) : 0;
         this.joyStick.setPosition(this.joystick.stickX, this.joystick.stickY);
       }
     });
@@ -412,13 +415,6 @@ class GameScene extends Phaser.Scene {
         this.joystick.dy = 0;
         this.joyBase.setVisible(false);
         this.joyStick.setVisible(false);
-      }
-    });
-
-    // Restart on right-side tap when game over
-    this.input.on('pointerdown', (p) => {
-      if (this.gameOver && p.x > GAME_W / 2) {
-        this.scene.restart();
       }
     });
   }
@@ -543,7 +539,7 @@ class GameScene extends Phaser.Scene {
 
     this.statusText.setText('YOU MADE IT!\nSUNRISE SURVIVED')
       .setColor('#ffdd44').setVisible(true);
-    this.subText.setText('Tap right side to play again').setVisible(true);
+    this.subText.setText('Tap anywhere to play again').setVisible(true);
     this.cameras.main.flash(500, 100, 100, 0);
   }
 
@@ -557,7 +553,7 @@ class GameScene extends Phaser.Scene {
 
     this.statusText.setText('YOU PERISH\n' + reason)
       .setColor('#ff2222').setVisible(true);
-    this.subText.setText('Tap right side to try again').setVisible(true);
+    this.subText.setText('Tap anywhere to try again').setVisible(true);
   }
 
   // ── Update ─────────────────────────────────────────────────────────────────
