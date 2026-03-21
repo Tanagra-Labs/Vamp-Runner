@@ -18,64 +18,124 @@ const NPC_SPEED = 55;
 const PRIEST_SPEED = 42;
 const GLAMOUR_RANGE = 72;
 
-// Level layout — 0=floor, 1=wall, 4=syringe, 5=shelter
-// Crosses and garlic are now moving NPCs, not tiles.
-function buildLevelData() {
+// ── Map variants ─────────────────────────────────────────────────────────────
+// variant 0 = horizontal corridors (original)
+// variant 1 = dense chokepoints
+// variant 2 = open-centre with perimeter pillars
+
+function buildLevelData(variant = 0) {
   const R = MAP_ROWS;
   const C = MAP_COLS;
   const grid = Array.from({ length: R }, () => new Array(C).fill(0));
 
-  // Border walls
+  // Always border walls
   for (let c = 0; c < C; c++) { grid[0][c] = 1; grid[R - 1][c] = 1; }
   for (let r = 0; r < R; r++) { grid[r][0] = 1; grid[r][C - 1] = 1; }
 
-  // Interior walls
-  const wallRanges = [
-    [4, 2, 8], [4, 11, 17],
-    [8, 4, 9], [8, 12, 18],
-    [12, 1, 6], [12, 9, 14],
-    [16, 3, 10], [16, 13, 17],
-    [20, 2, 7], [20, 11, 16],
-    [24, 4, 9], [24, 12, 18],
-  ];
-  wallRanges.forEach(([r, c1, c2]) => {
-    for (let c = c1; c <= c2; c++) grid[r][c] = 1;
-  });
+  if (variant === 0) {
+    // Horizontal corridor walls — original layout
+    [
+      [4, 2, 8], [4, 11, 17],
+      [8, 4, 9], [8, 12, 18],
+      [12, 1, 6], [12, 9, 14],
+      [16, 3, 10], [16, 13, 17],
+      [20, 2, 7], [20, 11, 16],
+      [24, 4, 9], [24, 12, 18],
+    ].forEach(([r, c1, c2]) => { for (let c = c1; c <= c2; c++) grid[r][c] = 1; });
 
-  // Blood syringes
-  const syringes = [
-    [6, 7], [6, 12], [10, 3], [10, 16], [14, 9], [18, 7],
-    [22, 10], [26, 5], [26, 14],
-  ];
-  syringes.forEach(([r, c]) => { if (grid[r][c] === 0) grid[r][c] = 4; });
+    [[6,7],[6,12],[10,3],[10,16],[14,9],[18,7],[22,10],[26,5],[26,14]]
+      .forEach(([r, c]) => { if (!grid[r][c]) grid[r][c] = 4; });
 
-  // Shelter at top-center
-  grid[1][10] = 5;
+  } else if (variant === 1) {
+    // Dense chokepoints — tight vertical slots force the player to pick routes
+    [
+      [3, 1, 7],  [3, 13, 19],
+      [6, 4, 10], [6, 11, 16],
+      [9, 2, 6],  [9, 14, 18],
+      [13, 5, 9], [13, 12, 17],
+      [17, 1, 8], [17, 11, 15],
+      [21, 3, 9], [21, 12, 18],
+      [25, 2, 7], [25, 13, 18],
+    ].forEach(([r, c1, c2]) => { for (let c = c1; c <= c2; c++) grid[r][c] = 1; });
+
+    // Vertical dividers to create narrow gaps
+    [[5,10],[10,10],[15,10],[20,10]]
+      .forEach(([r, c]) => { grid[r][c] = 1; grid[r+1][c] = 1; });
+
+    [[5,5],[8,14],[11,3],[14,16],[18,8],[22,11],[26,6],[26,15],[4,10]]
+      .forEach(([r, c]) => { if (!grid[r][c]) grid[r][c] = 4; });
+
+  } else {
+    // Open centre — perimeter rooms with 3×3 pillar clusters in the open field
+    const pillars = [
+      [4,3],[4,4],[5,3],
+      [4,16],[4,17],[5,17],
+      [8,7],[8,8],[9,7],
+      [8,12],[8,13],[9,13],
+      [14,3],[14,4],[15,3],
+      [14,16],[14,17],[15,17],
+      [19,6],[19,7],[20,6],
+      [19,12],[19,13],[20,13],
+      [24,4],[24,5],[25,4],
+      [24,15],[24,16],[25,16],
+    ];
+    pillars.forEach(([r, c]) => { grid[r][c] = 1; });
+
+    // Two horizontal half-walls at mid-map to break line-of-sight
+    for (let c = 1; c <= 6; c++)  grid[12][c] = 1;
+    for (let c = 13; c <= 18; c++) grid[12][c] = 1;
+    for (let c = 1; c <= 6; c++)  grid[22][c] = 1;
+    for (let c = 13; c <= 18; c++) grid[22][c] = 1;
+
+    [[6,10],[10,5],[10,15],[16,9],[16,11],[20,4],[20,16],[27,8],[27,13]]
+      .forEach(([r, c]) => { if (!grid[r][c]) grid[r][c] = 4; });
+  }
+
+  grid[1][10] = 5; // shelter always at top-centre
   return grid;
 }
 
-// NPC starting positions
-function getNPCSpawns() {
-  return [
-    { r: 3,  c: 4,  type: 'priest' },
-    { r: 3,  c: 14, type: 'priest' },
-    { r: 7,  c: 2,  type: 'priest' },
-    { r: 7,  c: 11, type: 'priest' },
-    { r: 11, c: 7,  type: 'priest' },
-    { r: 23, c: 4,  type: 'priest' },
-    { r: 5,  c: 3,  type: 'garlic' },
-    { r: 5,  c: 16, type: 'garlic' },
-    { r: 9,  c: 5,  type: 'garlic' },
-    { r: 9,  c: 13, type: 'garlic' },
-    { r: 17, c: 5,  type: 'garlic' },
-    { r: 17, c: 14, type: 'garlic' },
-    { r: 6,  c: 10, type: 'plain'  },
-    { r: 13, c: 3,  type: 'plain'  },
-    { r: 15, c: 13, type: 'plain'  },
-    { r: 19, c: 6,  type: 'plain'  },
-    { r: 21, c: 15, type: 'plain'  },
-    { r: 25, c: 8,  type: 'plain'  },
+// NPC starting positions per map variant
+function getNPCSpawns(variant = 0) {
+  const spawns = [
+    // variant 0 — original
+    [
+      { r: 3,  c: 4,  type: 'priest' }, { r: 3,  c: 14, type: 'priest' },
+      { r: 7,  c: 2,  type: 'priest' }, { r: 7,  c: 11, type: 'priest' },
+      { r: 11, c: 7,  type: 'priest' }, { r: 23, c: 4,  type: 'priest' },
+      { r: 5,  c: 3,  type: 'garlic' }, { r: 5,  c: 16, type: 'garlic' },
+      { r: 9,  c: 5,  type: 'garlic' }, { r: 9,  c: 13, type: 'garlic' },
+      { r: 17, c: 5,  type: 'garlic' }, { r: 17, c: 14, type: 'garlic' },
+      { r: 6,  c: 10, type: 'plain'  }, { r: 13, c: 3,  type: 'plain'  },
+      { r: 15, c: 13, type: 'plain'  }, { r: 19, c: 6,  type: 'plain'  },
+      { r: 21, c: 15, type: 'plain'  }, { r: 25, c: 8,  type: 'plain'  },
+    ],
+    // variant 1 — dense chokepoints
+    [
+      { r: 4,  c: 9,  type: 'priest' }, { r: 4,  c: 11, type: 'priest' },
+      { r: 8,  c: 2,  type: 'priest' }, { r: 8,  c: 17, type: 'priest' },
+      { r: 16, c: 10, type: 'priest' }, { r: 24, c: 9,  type: 'priest' },
+      { r: 7,  c: 3,  type: 'garlic' }, { r: 7,  c: 17, type: 'garlic' },
+      { r: 12, c: 3,  type: 'garlic' }, { r: 12, c: 18, type: 'garlic' },
+      { r: 19, c: 5,  type: 'garlic' }, { r: 19, c: 16, type: 'garlic' },
+      { r: 6,  c: 11, type: 'plain'  }, { r: 11, c: 6,  type: 'plain'  },
+      { r: 14, c: 12, type: 'plain'  }, { r: 20, c: 9,  type: 'plain'  },
+      { r: 23, c: 5,  type: 'plain'  }, { r: 27, c: 14, type: 'plain'  },
+    ],
+    // variant 2 — open centre
+    [
+      { r: 3,  c: 5,  type: 'priest' }, { r: 3,  c: 15, type: 'priest' },
+      { r: 7,  c: 10, type: 'priest' }, { r: 13, c: 9,  type: 'priest' },
+      { r: 18, c: 4,  type: 'priest' }, { r: 23, c: 14, type: 'priest' },
+      { r: 6,  c: 3,  type: 'garlic' }, { r: 6,  c: 17, type: 'garlic' },
+      { r: 11, c: 7,  type: 'garlic' }, { r: 11, c: 12, type: 'garlic' },
+      { r: 17, c: 9,  type: 'garlic' }, { r: 21, c: 15, type: 'garlic' },
+      { r: 5,  c: 10, type: 'plain'  }, { r: 10, c: 4,  type: 'plain'  },
+      { r: 13, c: 14, type: 'plain'  }, { r: 18, c: 11, type: 'plain'  },
+      { r: 23, c: 5,  type: 'plain'  }, { r: 26, c: 10, type: 'plain'  },
+    ],
   ];
+  return spawns[variant] || spawns[0];
 }
 
 // ─── SCENES ──────────────────────────────────────────────────────────────────
@@ -345,7 +405,8 @@ class GameScene extends Phaser.Scene {
     this.npcs = [];
     this.npcGroup = this.physics.add.group();
 
-    getNPCSpawns().forEach(({ r, c, type }) => {
+    const mapVariant = Math.floor((this.nightNumber - 1) / 5) % 3;
+    getNPCSpawns(mapVariant).forEach(({ r, c, type }) => {
       const x = c * TILE + TILE / 2;
       const y = r * TILE + TILE / 2;
       const texKey = type === 'priest' ? 'npc_priest' : type === 'garlic' ? 'npc_garlic' : 'npc_plain';
