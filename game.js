@@ -672,6 +672,147 @@ class GameScene extends Phaser.Scene {
   }
 }
 
+// ─── SCORE SCENE ─────────────────────────────────────────────────────────────
+
+class ScoreScene extends Phaser.Scene {
+  constructor() { super('Score'); }
+
+  init(data) {
+    this.finalScore = data.score || 0;
+    this.won = data.won || false;
+    this.playerName = '';
+    this.submitted = false;
+  }
+
+  create() {
+    this.cameras.main.setBackgroundColor('#0a0a14');
+    const cx = GAME_W / 2;
+
+    // Result title
+    this.add.text(cx, 55, this.won ? 'SUNRISE SURVIVED' : 'YOU PERISH', {
+      fontFamily: 'Georgia, serif', fontSize: '30px',
+      color: this.won ? '#ffdd44' : '#ff2222', stroke: '#000', strokeThickness: 4,
+    }).setOrigin(0.5, 0.5);
+
+    this.add.text(cx, 100, 'SCORE  ' + String(this.finalScore).padStart(6, '0'), {
+      fontFamily: 'Courier New, monospace', fontSize: '24px', color: '#ffffff', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5, 0.5);
+
+    this.add.text(cx, 138, 'ENTER YOUR NAME', {
+      fontFamily: 'Georgia, serif', fontSize: '15px', color: '#aaaaaa',
+    }).setOrigin(0.5, 0.5);
+
+    this.nameDisplay = this.add.text(cx, 172, this.getNameDisplay(), {
+      fontFamily: 'Courier New, monospace', fontSize: '30px', color: '#ffdd44', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5, 0.5);
+
+    this.buildKeyboard();
+    this.buildLeaderboard();
+  }
+
+  getNameDisplay() {
+    let s = '';
+    for (let i = 0; i < 7; i++) {
+      s += i < this.playerName.length ? this.playerName[i] : '_';
+      if (i < 6) s += ' ';
+    }
+    return s;
+  }
+
+  buildKeyboard() {
+    const cx = GAME_W / 2;
+    const rows = ['ABCDEFGHI', 'JKLMNOPQR', 'STUVWXYZ'];
+    const KEY = 34, GAP = 3;
+
+    rows.forEach((row, ri) => {
+      const letters = row.split('');
+      const rowW = letters.length * KEY + (letters.length - 1) * GAP;
+      const rx = (GAME_W - rowW) / 2;
+      const ry = 205 + ri * (KEY + GAP);
+      letters.forEach((letter, ci) => {
+        const kx = rx + ci * (KEY + GAP) + KEY / 2;
+        const ky = ry + KEY / 2;
+        const bg = this.add.rectangle(kx, ky, KEY - 2, KEY - 2, 0x2a2a4a).setInteractive({ useHandCursor: true });
+        this.add.text(kx, ky, letter, { fontFamily: 'Courier New, monospace', fontSize: '17px', color: '#ddddff' }).setOrigin(0.5, 0.5);
+        bg.on('pointerdown', () => this.pressKey(letter));
+        bg.on('pointerover', () => bg.setFillStyle(0x554488));
+        bg.on('pointerout',  () => bg.setFillStyle(0x2a2a4a));
+      });
+    });
+
+    const btnY = 205 + 3 * (KEY + GAP) + 10;
+
+    const backBg = this.add.rectangle(cx - 65, btnY + 16, 108, 30, 0x442222).setInteractive({ useHandCursor: true });
+    this.add.text(cx - 65, btnY + 16, '< BACK', { fontFamily: 'Courier New, monospace', fontSize: '15px', color: '#ff8888' }).setOrigin(0.5, 0.5);
+    backBg.on('pointerdown', () => this.pressBack());
+    backBg.on('pointerover', () => backBg.setFillStyle(0x773333));
+    backBg.on('pointerout',  () => backBg.setFillStyle(0x442222));
+
+    const doneBg = this.add.rectangle(cx + 65, btnY + 16, 108, 30, 0x224422).setInteractive({ useHandCursor: true });
+    this.add.text(cx + 65, btnY + 16, 'DONE >', { fontFamily: 'Courier New, monospace', fontSize: '15px', color: '#88ff88' }).setOrigin(0.5, 0.5);
+    doneBg.on('pointerdown', () => this.submitScore());
+    doneBg.on('pointerover', () => doneBg.setFillStyle(0x337733));
+    doneBg.on('pointerout',  () => doneBg.setFillStyle(0x224422));
+  }
+
+  pressKey(letter) {
+    if (this.submitted || this.playerName.length >= 7) return;
+    this.playerName += letter;
+    this.nameDisplay.setText(this.getNameDisplay());
+  }
+
+  pressBack() {
+    if (this.submitted || this.playerName.length === 0) return;
+    this.playerName = this.playerName.slice(0, -1);
+    this.nameDisplay.setText(this.getNameDisplay());
+  }
+
+  submitScore() {
+    if (this.submitted) return;
+    this.submitted = true;
+    const name = (this.playerName || 'AAA').padEnd(7).slice(0, 7);
+    const scores = this.loadScores();
+    scores.push({ name, score: this.finalScore });
+    scores.sort((a, b) => b.score - a.score);
+    scores.splice(10);
+    try { localStorage.setItem('vampRunnerScores', JSON.stringify(scores)); } catch {}
+    this.buildLeaderboard();
+
+    this.add.text(GAME_W / 2, GAME_H - 30, 'TAP TO PLAY AGAIN', {
+      fontFamily: 'Georgia, serif', fontSize: '16px', color: '#ffdd44', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5, 0.5);
+    this.input.once('pointerdown', () => this.scene.start('Game'));
+  }
+
+  loadScores() {
+    try { return JSON.parse(localStorage.getItem('vampRunnerScores')) || []; }
+    catch { return []; }
+  }
+
+  buildLeaderboard() {
+    if (this.lbContainer) this.lbContainer.destroy();
+    this.lbContainer = this.add.container(0, 0);
+    const scores = this.loadScores();
+    const sy = 370;
+
+    this.lbContainer.add(
+      this.add.text(GAME_W / 2, sy, '\u2500\u2500\u2500 HIGH SCORES \u2500\u2500\u2500', {
+        fontFamily: 'Georgia, serif', fontSize: '14px', color: '#ffaa00', stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0.5, 0.5)
+    );
+
+    scores.slice(0, 8).forEach(({ name, score }, i) => {
+      const line = String(i + 1).padStart(2) + '.  ' + name.padEnd(7) + '  ' + String(score).padStart(6, '0');
+      const color = i === 0 ? '#ffdd44' : i < 3 ? '#cccccc' : '#777788';
+      this.lbContainer.add(
+        this.add.text(GAME_W / 2, sy + 24 + i * 22, line, {
+          fontFamily: 'Courier New, monospace', fontSize: '14px', color,
+        }).setOrigin(0.5, 0.5)
+      );
+    });
+  }
+}
+
 // ─── CONFIG & LAUNCH ──────────────────────────────────────────────────────────
 
 const config = {
@@ -683,7 +824,7 @@ const config = {
     default: 'arcade',
     arcade: { gravity: { y: 0 }, debug: false },
   },
-  scene: [BootScene, GameScene],
+  scene: [BootScene, GameScene, ScoreScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
