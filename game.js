@@ -14,22 +14,23 @@ const PLAYER_SPEED = 200;
 const SUNRISE_DURATION = 90; // seconds
 const GARLIC_HITS_PER_LIFE = 3;
 const MAX_LIVES = 3;
+const NPC_SPEED = 55;
+const PRIEST_SPEED = 42;
+const GLAMOUR_RANGE = 72;
 
-// Simple level layout — 0=floor, 1=wall, 2=cross, 3=garlic, 4=syringe, 5=shelter
-// Map is MAP_ROWS x MAP_COLS
+// Level layout — 0=floor, 1=wall, 4=syringe, 5=shelter
+// Crosses and garlic are now moving NPCs, not tiles.
 function buildLevelData() {
   const R = MAP_ROWS;
   const C = MAP_COLS;
-  // Start with all floor
   const grid = Array.from({ length: R }, () => new Array(C).fill(0));
 
   // Border walls
   for (let c = 0; c < C; c++) { grid[0][c] = 1; grid[R - 1][c] = 1; }
   for (let r = 0; r < R; r++) { grid[r][0] = 1; grid[r][C - 1] = 1; }
 
-  // Interior walls — create corridors
+  // Interior walls
   const wallRanges = [
-    // [row, colStart, colEnd]
     [4, 2, 8], [4, 11, 17],
     [8, 4, 9], [8, 12, 18],
     [12, 1, 6], [12, 9, 14],
@@ -41,20 +42,6 @@ function buildLevelData() {
     for (let c = c1; c <= c2; c++) grid[r][c] = 1;
   });
 
-  // Crosses — dangerous obstacles
-  const crosses = [
-    [3, 4], [3, 14], [7, 2], [7, 11], [11, 7], [11, 16],
-    [15, 3], [15, 13], [19, 6], [19, 15], [23, 4], [23, 12],
-  ];
-  crosses.forEach(([r, c]) => { if (grid[r][c] === 0) grid[r][c] = 2; });
-
-  // Garlic patches
-  const garlics = [
-    [5, 3], [5, 16], [9, 5], [9, 13], [13, 2], [13, 17],
-    [17, 5], [17, 14], [21, 3], [21, 15], [25, 6], [25, 11],
-  ];
-  garlics.forEach(([r, c]) => { if (grid[r][c] === 0) grid[r][c] = 3; });
-
   // Blood syringes
   const syringes = [
     [6, 7], [6, 12], [10, 3], [10, 16], [14, 9], [18, 7],
@@ -62,10 +49,33 @@ function buildLevelData() {
   ];
   syringes.forEach(([r, c]) => { if (grid[r][c] === 0) grid[r][c] = 4; });
 
-  // Shelter at top-center (player starts at bottom-center)
+  // Shelter at top-center
   grid[1][10] = 5;
-
   return grid;
+}
+
+// NPC starting positions
+function getNPCSpawns() {
+  return [
+    { r: 3,  c: 4,  type: 'priest' },
+    { r: 3,  c: 14, type: 'priest' },
+    { r: 7,  c: 2,  type: 'priest' },
+    { r: 7,  c: 11, type: 'priest' },
+    { r: 11, c: 7,  type: 'priest' },
+    { r: 23, c: 4,  type: 'priest' },
+    { r: 5,  c: 3,  type: 'garlic' },
+    { r: 5,  c: 16, type: 'garlic' },
+    { r: 9,  c: 5,  type: 'garlic' },
+    { r: 9,  c: 13, type: 'garlic' },
+    { r: 17, c: 5,  type: 'garlic' },
+    { r: 17, c: 14, type: 'garlic' },
+    { r: 6,  c: 10, type: 'plain'  },
+    { r: 13, c: 3,  type: 'plain'  },
+    { r: 15, c: 13, type: 'plain'  },
+    { r: 19, c: 6,  type: 'plain'  },
+    { r: 21, c: 15, type: 'plain'  },
+    { r: 25, c: 8,  type: 'plain'  },
+  ];
 }
 
 // ─── SCENES ──────────────────────────────────────────────────────────────────
@@ -249,58 +259,53 @@ class GameScene extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor('#000000');
 
-    // State
     this.lives = MAX_LIVES;
     this.garlicHits = 0;
     this.timeLeft = SUNRISE_DURATION;
     this.gameOver = false;
     this.won = false;
-    this.invincible = false; // brief iframes after hit
+    this.invincible = false;
+    this.syringesCollected = 0;
+    this.glamouredEver = 0;
+    this.livesLost = 0;
 
-    // Build world
     this.levelData = buildLevelData();
     this.buildWorld();
-
-    // Player
     this.spawnPlayer();
+    this.spawnNPCs();
 
-    // Sunlight creep (rendered as a rectangle overlay that grows from top)
     this.sunlightHeight = 0;
-    this.sunlightGraphic = this.add.graphics();
-    this.sunlightGraphic.setDepth(5);
+    this.sunlightGraphic = this.add.graphics().setDepth(5);
 
-    // Camera
     this.cameras.main.setBounds(0, 0, MAP_W, MAP_H);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
-    // UI (fixed to camera)
     this.buildUI();
-
-    // Virtual joystick
     this.buildJoystick();
 
-    // Overlap/collision
     this.physics.add.collider(this.player, this.walls);
-    this.physics.add.overlap(this.player, this.crosses, this.hitCross, null, this);
-    this.physics.add.overlap(this.player, this.garlics, this.hitGarlic, null, this);
+    this.physics.add.overlap(this.player, this.npcGroup, (player, npcSprite) => {
+      const npc = this.npcs.find(n => n.sprite === npcSprite);
+      if (!npc || npc.glamoured) return;
+      if (npc.type === 'priest') this.hitByPriest();
+      else if (npc.type === 'garlic') this.hitByGarlicNPC();
+    });
     this.physics.add.overlap(this.player, this.syringes, this.collectSyringe, null, this);
     this.physics.add.overlap(this.player, this.shelterGroup, this.reachShelter, null, this);
 
-    // Countdown timer
-    this.time.addEvent({
-      delay: 1000,
-      loop: true,
-      callback: this.tickTimer,
-      callbackScope: this,
-    });
+    this.time.addEvent({ delay: 1000, loop: true, callback: this.tickTimer, callbackScope: this });
+
+    const hint = this.add.text(GAME_W / 2, GAME_H - 80, 'Tap civilians to glamour them', {
+      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#cc44ff',
+      stroke: '#000', strokeThickness: 2, align: 'center',
+    }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5);
+    this.tweens.add({ targets: hint, alpha: 0, duration: 1200, delay: 3000, onComplete: () => hint.destroy() });
   }
 
-  // ── World builder ──────────────────────────────────────────────────────────
+  // ── World ──────────────────────────────────────────────────────────────────
 
   buildWorld() {
     this.walls = this.physics.add.staticGroup();
-    this.crosses = this.physics.add.staticGroup();
-    this.garlics = this.physics.add.staticGroup();
     this.syringes = this.physics.add.staticGroup();
     this.shelterGroup = this.physics.add.staticGroup();
 
@@ -309,151 +314,210 @@ class GameScene extends Phaser.Scene {
         const x = c * TILE + TILE / 2;
         const y = r * TILE + TILE / 2;
         const cell = this.levelData[r][c];
-
-        // Always draw floor underneath
         this.add.image(x, y, 'floor').setDepth(0);
-
-        if (cell === 1) {
-          const w = this.walls.create(x, y, 'wall').setDepth(1);
-          w.refreshBody();
-        } else if (cell === 2) {
-          const cr = this.crosses.create(x, y, 'cross').setDepth(1);
-          cr.refreshBody();
-        } else if (cell === 3) {
-          const ga = this.garlics.create(x, y, 'garlic').setDepth(1);
-          ga.refreshBody();
-        } else if (cell === 4) {
-          const sy = this.syringes.create(x, y, 'syringe').setDepth(1);
-          sy.refreshBody();
-        } else if (cell === 5) {
-          const sh = this.shelterGroup.create(x, y, 'shelter').setDepth(1);
-          sh.refreshBody();
-        }
+        if      (cell === 1) this.walls.create(x, y, 'wall').setDepth(1).refreshBody();
+        else if (cell === 4) this.syringes.create(x, y, 'syringe').setDepth(1).refreshBody();
+        else if (cell === 5) this.shelterGroup.create(x, y, 'shelter').setDepth(1).refreshBody();
       }
     }
   }
 
   spawnPlayer() {
-    // Start at bottom-center of map
     const startX = Math.floor(MAP_COLS / 2) * TILE + TILE / 2;
     const startY = (MAP_ROWS - 3) * TILE + TILE / 2;
     this.player = this.physics.add.image(startX, startY, 'player')
-      .setDepth(3)
-      .setCircle(14, 2, 2)
-      .setCollideWorldBounds(true);
+      .setDepth(3).setCircle(14, 2, 2).setCollideWorldBounds(true);
     this.physics.world.setBounds(0, 0, MAP_W, MAP_H);
+  }
+
+  // ── NPCs ───────────────────────────────────────────────────────────────────
+
+  spawnNPCs() {
+    this.npcs = [];
+    this.npcGroup = this.physics.add.group();
+
+    getNPCSpawns().forEach(({ r, c, type }) => {
+      const x = c * TILE + TILE / 2;
+      const y = r * TILE + TILE / 2;
+      const texKey = type === 'priest' ? 'npc_priest' : type === 'garlic' ? 'npc_garlic' : 'npc_plain';
+      const sprite = this.physics.add.image(x, y, texKey)
+        .setDepth(2).setCircle(12, 4, 4).setCollideWorldBounds(true);
+      this.npcGroup.add(sprite);
+      this.physics.add.collider(sprite, this.walls);
+
+      const npc = { sprite, type, glamoured: false, dirTimer: Phaser.Math.Between(400, 1800), dx: 0, dy: 0, stunned: false, stunTimer: 0 };
+      this.pickDirection(npc);
+      this.npcs.push(npc);
+    });
+  }
+
+  pickDirection(npc) {
+    if (npc.glamoured) {
+      // Move toward nearest syringe, or idle near player
+      const target = this.nearestSyringe(npc.sprite.x, npc.sprite.y);
+      if (target) {
+        const dx = target.x - npc.sprite.x;
+        const dy = target.y - npc.sprite.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        npc.dx = dx / len; npc.dy = dy / len;
+      } else {
+        const dx = this.player.x - npc.sprite.x;
+        const dy = this.player.y - npc.sprite.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 80) { npc.dx = dx / dist; npc.dy = dy / dist; }
+        else { npc.dx = 0; npc.dy = 0; }
+      }
+      return;
+    }
+
+    // Priests bias toward player 50% of the time
+    if (npc.type === 'priest' && this.player && Math.random() < 0.5) {
+      const dx = this.player.x - npc.sprite.x;
+      const dy = this.player.y - npc.sprite.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      npc.dx = dx / len; npc.dy = dy / len;
+    } else {
+      const angle = Math.random() * Math.PI * 2;
+      npc.dx = Math.cos(angle); npc.dy = Math.sin(angle);
+    }
+  }
+
+  nearestSyringe(x, y) {
+    let best = null, bestDist = Infinity;
+    this.syringes.getChildren().forEach(s => {
+      const d = Phaser.Math.Distance.Between(x, y, s.x, s.y);
+      if (d < bestDist) { bestDist = d; best = s; }
+    });
+    return best;
+  }
+
+  updateNPCs(delta) {
+    this.npcs.forEach(npc => {
+      if (!npc.sprite.active) return;
+
+      if (npc.stunned) {
+        npc.stunTimer -= delta;
+        if (npc.stunTimer <= 0) { npc.stunned = false; npc.sprite.clearTint(); }
+        npc.sprite.setVelocity(0, 0);
+        return;
+      }
+
+      const blocked = !npc.sprite.body.blocked.none;
+      npc.dirTimer -= delta;
+      if (npc.dirTimer <= 0 || blocked) {
+        const interval = npc.glamoured ? 600 : npc.type === 'priest' ? 1500 : 2200;
+        npc.dirTimer = interval + Phaser.Math.Between(0, 500);
+        this.pickDirection(npc);
+      }
+
+      const speed = npc.glamoured ? NPC_SPEED * 1.3 : npc.type === 'priest' ? PRIEST_SPEED : NPC_SPEED;
+      npc.sprite.setVelocity(npc.dx * speed, npc.dy * speed);
+      if (npc.dx < 0) npc.sprite.setFlipX(true);
+      else if (npc.dx > 0) npc.sprite.setFlipX(false);
+
+      if (npc.glamoured) {
+        // Collect nearby syringes
+        const nearby = this.nearestSyringe(npc.sprite.x, npc.sprite.y);
+        if (nearby && Phaser.Math.Distance.Between(npc.sprite.x, npc.sprite.y, nearby.x, nearby.y) < 22) {
+          nearby.destroy();
+          this.syringesCollected++;
+          if (this.garlicHits > 0) this.garlicHits = Math.max(0, this.garlicHits - 1);
+          this.updateUI();
+          this.floatText(npc.sprite.x, npc.sprite.y, '+BLOOD', '#ff2222');
+          this.pickDirection(npc);
+        }
+        // Stun nearby priests
+        this.npcs.forEach(other => {
+          if (other === npc || other.type !== 'priest' || other.glamoured || other.stunned) return;
+          if (Phaser.Math.Distance.Between(npc.sprite.x, npc.sprite.y, other.sprite.x, other.sprite.y) < 50) {
+            other.stunned = true;
+            other.stunTimer = 2000;
+            other.sprite.setTint(0xaaaaff);
+          }
+        });
+      }
+    });
+  }
+
+  // Tap-to-glamour: finds a plain NPC near the tapped world position
+  findGlamourTarget(wx, wy) {
+    for (const npc of this.npcs) {
+      if (npc.type !== 'plain' || npc.glamoured || !npc.sprite.active) continue;
+      if (Phaser.Math.Distance.Between(wx, wy, npc.sprite.x, npc.sprite.y) < GLAMOUR_RANGE) return npc;
+    }
+    return null;
+  }
+
+  glamourNPC(npc) {
+    npc.glamoured = true;
+    npc.sprite.setTexture('npc_glamoured');
+    npc.dirTimer = 0;
+    this.glamouredEver++;
+    this.updateUI();
+    this.cameras.main.flash(120, 80, 0, 120);
+    this.floatText(npc.sprite.x, npc.sprite.y - 10, 'GLAMOURED!', '#dd44ff');
   }
 
   // ── UI ─────────────────────────────────────────────────────────────────────
 
   buildUI() {
-    const cam = this.cameras.main;
-    const cx = cam.scrollX;
-
-    // Timer bar background
     this.timerBg = this.add.rectangle(GAME_W / 2, 28, GAME_W - 20, 20, 0x333333)
       .setScrollFactor(0).setDepth(10).setOrigin(0.5, 0.5);
-
     this.timerBar = this.add.rectangle(10, 18, GAME_W - 20, 16, 0xffa500)
       .setScrollFactor(0).setDepth(11).setOrigin(0, 0);
-
     this.timerText = this.add.text(GAME_W / 2, 28, '90', {
-      fontFamily: 'Georgia, serif',
-      fontSize: '14px',
-      color: '#ffffff',
-      stroke: '#000000',
-      strokeThickness: 3,
+      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#ffffff', stroke: '#000000', strokeThickness: 3,
     }).setScrollFactor(0).setDepth(12).setOrigin(0.5, 0.5);
 
-    // Lives (coffin icons drawn as text emojis — fallback: rectangles)
     this.livesText = this.add.text(10, 50, '', {
-      fontFamily: 'Georgia, serif',
-      fontSize: '22px',
-      color: '#8b0000',
+      fontFamily: 'Georgia, serif', fontSize: '22px', color: '#8b0000',
     }).setScrollFactor(0).setDepth(10);
 
-    // Garlic hit counter
     this.garlicText = this.add.text(GAME_W - 10, 50, '', {
-      fontFamily: 'Georgia, serif',
-      fontSize: '14px',
-      color: '#d4e6a5',
-      stroke: '#000',
-      strokeThickness: 2,
+      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#d4e6a5', stroke: '#000', strokeThickness: 2,
     }).setScrollFactor(0).setDepth(10).setOrigin(1, 0);
 
-    // Status message
-    this.statusText = this.add.text(GAME_W / 2, GAME_H / 2, '', {
-      fontFamily: 'Georgia, serif',
-      fontSize: '32px',
-      color: '#ff2222',
-      stroke: '#000',
-      strokeThickness: 4,
-      align: 'center',
-    }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5).setVisible(false);
-
-    // Sub-status (restart hint)
-    this.subText = this.add.text(GAME_W / 2, GAME_H / 2 + 50, '', {
-      fontFamily: 'Georgia, serif',
-      fontSize: '18px',
-      color: '#cccccc',
-      stroke: '#000',
-      strokeThickness: 3,
-      align: 'center',
-    }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5).setVisible(false);
+    this.glamourText = this.add.text(GAME_W / 2, 50, '', {
+      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#dd44ff', stroke: '#000', strokeThickness: 2,
+    }).setScrollFactor(0).setDepth(10).setOrigin(0.5, 0);
 
     this.updateUI();
   }
 
   updateUI() {
-    // Timer bar
     const pct = this.timeLeft / SUNRISE_DURATION;
-    const barW = (GAME_W - 20) * pct;
-    this.timerBar.width = Math.max(0, barW);
-    const col = pct > 0.5 ? 0xffa500 : pct > 0.25 ? 0xff6600 : 0xff2200;
-    this.timerBar.setFillStyle(col);
+    this.timerBar.width = Math.max(0, (GAME_W - 20) * pct);
+    this.timerBar.setFillStyle(pct > 0.5 ? 0xffa500 : pct > 0.25 ? 0xff6600 : 0xff2200);
     this.timerText.setText(String(Math.max(0, this.timeLeft)) + 's');
-
-    // Lives
-    const coffin = '⚰';
-    this.livesText.setText(coffin.repeat(this.lives));
-
-    // Garlic hits
-    if (this.garlicHits > 0) {
-      this.garlicText.setText('🧄 ' + this.garlicHits + '/' + GARLIC_HITS_PER_LIFE);
-    } else {
-      this.garlicText.setText('');
-    }
+    this.livesText.setText('⚰'.repeat(this.lives));
+    this.garlicText.setText(this.garlicHits > 0 ? '🧄 ' + this.garlicHits + '/' + GARLIC_HITS_PER_LIFE : '');
+    const gc = this.npcs ? this.npcs.filter(n => n.glamoured).length : 0;
+    this.glamourText.setText(gc > 0 ? '✨ ' + gc + ' glamoured' : '');
   }
 
-  // ── Virtual Joystick ───────────────────────────────────────────────────────
+  floatText(x, y, msg, color) {
+    const txt = this.add.text(x, y, msg, {
+      fontFamily: 'Georgia, serif', fontSize: '15px', color, stroke: '#000', strokeThickness: 2,
+    }).setDepth(9);
+    this.tweens.add({ targets: txt, y: y - 45, alpha: 0, duration: 900, onComplete: () => txt.destroy() });
+  }
+
+  // ── Joystick ───────────────────────────────────────────────────────────────
 
   buildJoystick() {
-    this.joystick = {
-      active: false,
-      pointerId: null,
-      baseX: 0, baseY: 0,
-      stickX: 0, stickY: 0,
-      dx: 0, dy: 0,
-    };
-
-    // Joystick visuals (drawn in camera space, always visible)
-    this.joyBase = this.add.circle(0, 0, 48, 0xffffff, 0.15)
-      .setScrollFactor(0).setDepth(15).setVisible(false);
-    this.joyStick = this.add.circle(0, 0, 24, 0xffffff, 0.35)
-      .setScrollFactor(0).setDepth(16).setVisible(false);
+    this.joystick = { active: false, pointerId: null, baseX: 0, baseY: 0, dx: 0, dy: 0 };
+    this.joyBase = this.add.circle(0, 0, 48, 0xffffff, 0.15).setScrollFactor(0).setDepth(15).setVisible(false);
+    this.joyStick = this.add.circle(0, 0, 24, 0xffffff, 0.35).setScrollFactor(0).setDepth(16).setVisible(false);
 
     this.input.on('pointerdown', (p) => {
-      if (this.gameOver) {
-        this.scene.restart();
-        return;
-      }
+      if (this.gameOver) return;
+      // Try glamour first
+      const target = this.findGlamourTarget(p.worldX, p.worldY);
+      if (target) { this.glamourNPC(target); return; }
       if (!this.joystick.active) {
         this.joystick.active = true;
         this.joystick.pointerId = p.id;
-        this.joystick.baseX = p.x;
-        this.joystick.baseY = p.y;
-        this.joystick.stickX = p.x;
-        this.joystick.stickY = p.y;
+        this.joystick.baseX = p.x; this.joystick.baseY = p.y;
         this.joyBase.setPosition(p.x, p.y).setVisible(true);
         this.joyStick.setPosition(p.x, p.y).setVisible(true);
       }
@@ -464,46 +528,37 @@ class GameScene extends Phaser.Scene {
         const dx = p.x - this.joystick.baseX;
         const dy = p.y - this.joystick.baseY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const maxR = 55;
-        const clamped = Math.min(dist, maxR);
         const angle = Math.atan2(dy, dx);
-        this.joystick.stickX = this.joystick.baseX + Math.cos(angle) * clamped;
-        this.joystick.stickY = this.joystick.baseY + Math.sin(angle) * clamped;
+        const clamped = Math.min(dist, 55);
+        this.joyStick.setPosition(this.joystick.baseX + Math.cos(angle) * clamped, this.joystick.baseY + Math.sin(angle) * clamped);
         this.joystick.dx = dist > 4 ? Math.cos(angle) : 0;
         this.joystick.dy = dist > 4 ? Math.sin(angle) : 0;
-        this.joyStick.setPosition(this.joystick.stickX, this.joystick.stickY);
       }
     });
 
     this.input.on('pointerup', (p) => {
       if (p.id === this.joystick.pointerId) {
-        this.joystick.active = false;
-        this.joystick.pointerId = null;
-        this.joystick.dx = 0;
-        this.joystick.dy = 0;
-        this.joyBase.setVisible(false);
-        this.joyStick.setVisible(false);
+        this.joystick.active = false; this.joystick.pointerId = null;
+        this.joystick.dx = 0; this.joystick.dy = 0;
+        this.joyBase.setVisible(false); this.joyStick.setVisible(false);
       }
     });
   }
 
-  // ── Hazard Handlers ────────────────────────────────────────────────────────
+  // ── Hazards ────────────────────────────────────────────────────────────────
 
-  hitCross(player, cross) {
+  hitByPriest() {
     if (this.invincible || this.gameOver) return;
-    this.loseLife('BURNED BY HOLY LIGHT');
+    this.loseLife('BURNED BY HOLY CROSS');
   }
 
-  hitGarlic(player, garlic) {
+  hitByGarlicNPC() {
     if (this.invincible || this.gameOver) return;
     this.garlicHits++;
     this.setInvincible(1500);
     this.cameras.main.shake(200, 0.005);
-
-    // Flash green tint
     this.player.setTint(0x88ff44);
     this.time.delayedCall(300, () => this.player.clearTint());
-
     if (this.garlicHits >= GARLIC_HITS_PER_LIFE) {
       this.garlicHits = 0;
       this.loseLife('GARLIC OVERLOAD');
@@ -513,16 +568,8 @@ class GameScene extends Phaser.Scene {
 
   collectSyringe(player, syringe) {
     syringe.destroy();
-    // Visual feedback
-    const txt = this.add.text(syringe.x, syringe.y, '+BLOOD', {
-      fontFamily: 'Georgia, serif', fontSize: '16px', color: '#ff2222',
-      stroke: '#000', strokeThickness: 2,
-    }).setDepth(8);
-    this.tweens.add({
-      targets: txt, y: syringe.y - 40, alpha: 0, duration: 800,
-      onComplete: () => txt.destroy(),
-    });
-    // Heal: reduce garlic hits by 1
+    this.syringesCollected++;
+    this.floatText(syringe.x, syringe.y, '+BLOOD', '#ff2222');
     if (this.garlicHits > 0) this.garlicHits = Math.max(0, this.garlicHits - 1);
     this.updateUI();
   }
@@ -532,118 +579,96 @@ class GameScene extends Phaser.Scene {
     this.triggerWin();
   }
 
-  // ── Life System ────────────────────────────────────────────────────────────
+  // ── Lives ──────────────────────────────────────────────────────────────────
 
   loseLife(reason) {
     this.lives--;
+    this.livesLost++;
     this.setInvincible(2000);
     this.cameras.main.shake(300, 0.012);
     this.cameras.main.flash(200, 150, 0, 0);
     this.updateUI();
-
-    if (this.lives <= 0) {
-      this.triggerLose(reason);
-    }
+    if (this.lives <= 0) this.triggerLose(reason);
   }
 
   setInvincible(ms) {
     this.invincible = true;
-    // Flash the player
-    this.tweens.add({
-      targets: this.player, alpha: 0.3, duration: 100,
-      yoyo: true, repeat: Math.floor(ms / 200),
-    });
-    this.time.delayedCall(ms, () => {
-      this.invincible = false;
-      this.player.setAlpha(1);
-    });
+    this.tweens.add({ targets: this.player, alpha: 0.3, duration: 100, yoyo: true, repeat: Math.floor(ms / 200) });
+    this.time.delayedCall(ms, () => { this.invincible = false; this.player.setAlpha(1); });
   }
 
-  // ── Timer ──────────────────────────────────────────────────────────────────
+  // ── Timer & sunlight ───────────────────────────────────────────────────────
 
   tickTimer() {
     if (this.gameOver) return;
     this.timeLeft = Math.max(0, this.timeLeft - 1);
     this.updateUI();
     this.updateSunlight();
-
-    if (this.timeLeft <= 0) {
-      this.triggerLose('SUNRISE — YOU BURN');
-    }
+    if (this.timeLeft <= 0) this.triggerLose('SUNRISE — YOU BURN');
   }
 
   updateSunlight() {
     const elapsed = SUNRISE_DURATION - this.timeLeft;
-    // Sunlight creeps down from y=0; full map covered at SUNRISE_DURATION
     this.sunlightHeight = (elapsed / SUNRISE_DURATION) * MAP_H;
-
     this.sunlightGraphic.clear();
     if (this.sunlightHeight > 0) {
-      // Gradient-ish: draw multiple strips
-      const strips = 8;
-      for (let i = 0; i < strips; i++) {
-        const alpha = 0.1 + (i / strips) * 0.45;
-        const stripH = this.sunlightHeight / strips;
-        this.sunlightGraphic.fillStyle(0xff8800, alpha);
-        this.sunlightGraphic.fillRect(0, i * stripH, MAP_W, stripH + 1);
+      for (let i = 0; i < 8; i++) {
+        this.sunlightGraphic.fillStyle(0xff8800, 0.1 + (i / 8) * 0.45);
+        this.sunlightGraphic.fillRect(0, i * (this.sunlightHeight / 8), MAP_W, this.sunlightHeight / 8 + 1);
       }
-      // Hard edge
       this.sunlightGraphic.fillStyle(0xffaa00, 0.6);
       this.sunlightGraphic.fillRect(0, this.sunlightHeight - 4, MAP_W, 4);
     }
-
-    // Check if player is in sunlight
-    if (!this.invincible && this.player.y < this.sunlightHeight) {
-      this.loseLife('CAUGHT IN SUNLIGHT');
-    }
+    if (!this.invincible && this.player.y < this.sunlightHeight) this.loseLife('CAUGHT IN SUNLIGHT');
   }
 
-  // ── End States ─────────────────────────────────────────────────────────────
+  // ── End states ─────────────────────────────────────────────────────────────
+
+  calculateScore() {
+    let s = 0;
+    if (this.won) s += 2000;
+    s += this.timeLeft * 15;
+    s += this.syringesCollected * 300;
+    s += this.glamouredEver * 150;
+    s -= this.livesLost * 200;
+    return Math.max(0, s);
+  }
 
   triggerWin() {
-    this.gameOver = true;
-    this.won = true;
+    this.gameOver = true; this.won = true;
     this.player.setVelocity(0, 0);
-
-    this.statusText.setText('YOU MADE IT!\nSUNRISE SURVIVED')
-      .setColor('#ffdd44').setVisible(true);
-    this.subText.setText('Tap anywhere to play again').setVisible(true);
     this.cameras.main.flash(500, 100, 100, 0);
+    this.time.delayedCall(1500, () => this.scene.start('Score', { score: this.calculateScore(), won: true }));
   }
 
   triggerLose(reason) {
     this.gameOver = true;
     this.player.setVelocity(0, 0);
     this.player.setTint(0xff4400);
-
     this.cameras.main.shake(400, 0.02);
     this.cameras.main.flash(300, 150, 30, 0);
-
-    this.statusText.setText('YOU PERISH\n' + reason)
-      .setColor('#ff2222').setVisible(true);
-    this.subText.setText('Tap anywhere to try again').setVisible(true);
+    this.add.text(GAME_W / 2, GAME_H / 2, 'YOU PERISH\n' + reason, {
+      fontFamily: 'Georgia, serif', fontSize: '28px', color: '#ff2222',
+      stroke: '#000', strokeThickness: 4, align: 'center',
+    }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5);
+    this.time.delayedCall(1800, () => this.scene.start('Score', { score: this.calculateScore(), won: false }));
   }
 
-  // ── Update ─────────────────────────────────────────────────────────────────
+  // ── Update loop ────────────────────────────────────────────────────────────
 
-  update() {
-    if (this.gameOver) {
-      this.player.setVelocity(0, 0);
-      return;
-    }
+  update(time, delta) {
+    if (this.gameOver) { this.player.setVelocity(0, 0); return; }
 
     const { dx, dy } = this.joystick;
     if (dx !== 0 || dy !== 0) {
       const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      this.player.setVelocity(
-        (dx / len) * PLAYER_SPEED,
-        (dy / len) * PLAYER_SPEED
-      );
-      // Face direction
+      this.player.setVelocity((dx / len) * PLAYER_SPEED, (dy / len) * PLAYER_SPEED);
       this.player.setFlipX(dx < 0);
     } else {
       this.player.setVelocity(0, 0);
     }
+
+    this.updateNPCs(delta);
   }
 }
 
