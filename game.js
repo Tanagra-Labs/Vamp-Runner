@@ -18,64 +18,124 @@ const NPC_SPEED = 55;
 const PRIEST_SPEED = 42;
 const GLAMOUR_RANGE = 72;
 
-// Level layout — 0=floor, 1=wall, 4=syringe, 5=shelter
-// Crosses and garlic are now moving NPCs, not tiles.
-function buildLevelData() {
+// ── Map variants ─────────────────────────────────────────────────────────────
+// variant 0 = horizontal corridors (original)
+// variant 1 = dense chokepoints
+// variant 2 = open-centre with perimeter pillars
+
+function buildLevelData(variant = 0) {
   const R = MAP_ROWS;
   const C = MAP_COLS;
   const grid = Array.from({ length: R }, () => new Array(C).fill(0));
 
-  // Border walls
+  // Always border walls
   for (let c = 0; c < C; c++) { grid[0][c] = 1; grid[R - 1][c] = 1; }
   for (let r = 0; r < R; r++) { grid[r][0] = 1; grid[r][C - 1] = 1; }
 
-  // Interior walls
-  const wallRanges = [
-    [4, 2, 8], [4, 11, 17],
-    [8, 4, 9], [8, 12, 18],
-    [12, 1, 6], [12, 9, 14],
-    [16, 3, 10], [16, 13, 17],
-    [20, 2, 7], [20, 11, 16],
-    [24, 4, 9], [24, 12, 18],
-  ];
-  wallRanges.forEach(([r, c1, c2]) => {
-    for (let c = c1; c <= c2; c++) grid[r][c] = 1;
-  });
+  if (variant === 0) {
+    // Horizontal corridor walls — original layout
+    [
+      [4, 2, 8], [4, 11, 17],
+      [8, 4, 9], [8, 12, 18],
+      [12, 1, 6], [12, 9, 14],
+      [16, 3, 10], [16, 13, 17],
+      [20, 2, 7], [20, 11, 16],
+      [24, 4, 9], [24, 12, 18],
+    ].forEach(([r, c1, c2]) => { for (let c = c1; c <= c2; c++) grid[r][c] = 1; });
 
-  // Blood syringes
-  const syringes = [
-    [6, 7], [6, 12], [10, 3], [10, 16], [14, 9], [18, 7],
-    [22, 10], [26, 5], [26, 14],
-  ];
-  syringes.forEach(([r, c]) => { if (grid[r][c] === 0) grid[r][c] = 4; });
+    [[6,7],[6,12],[10,3],[10,16],[14,9],[18,7],[22,10],[26,5],[26,14]]
+      .forEach(([r, c]) => { if (!grid[r][c]) grid[r][c] = 4; });
 
-  // Shelter at top-center
-  grid[1][10] = 5;
+  } else if (variant === 1) {
+    // Dense chokepoints — tight vertical slots force the player to pick routes
+    [
+      [3, 1, 7],  [3, 13, 19],
+      [6, 4, 10], [6, 11, 16],
+      [9, 2, 6],  [9, 14, 18],
+      [13, 5, 9], [13, 12, 17],
+      [17, 1, 8], [17, 11, 15],
+      [21, 3, 9], [21, 12, 18],
+      [25, 2, 7], [25, 13, 18],
+    ].forEach(([r, c1, c2]) => { for (let c = c1; c <= c2; c++) grid[r][c] = 1; });
+
+    // Vertical dividers to create narrow gaps
+    [[5,10],[10,10],[15,10],[20,10]]
+      .forEach(([r, c]) => { grid[r][c] = 1; grid[r+1][c] = 1; });
+
+    [[5,5],[8,14],[11,3],[14,16],[18,8],[22,11],[26,6],[26,15],[4,10]]
+      .forEach(([r, c]) => { if (!grid[r][c]) grid[r][c] = 4; });
+
+  } else {
+    // Open centre — perimeter rooms with 3×3 pillar clusters in the open field
+    const pillars = [
+      [4,3],[4,4],[5,3],
+      [4,16],[4,17],[5,17],
+      [8,7],[8,8],[9,7],
+      [8,12],[8,13],[9,13],
+      [14,3],[14,4],[15,3],
+      [14,16],[14,17],[15,17],
+      [19,6],[19,7],[20,6],
+      [19,12],[19,13],[20,13],
+      [24,4],[24,5],[25,4],
+      [24,15],[24,16],[25,16],
+    ];
+    pillars.forEach(([r, c]) => { grid[r][c] = 1; });
+
+    // Two horizontal half-walls at mid-map to break line-of-sight
+    for (let c = 1; c <= 6; c++)  grid[12][c] = 1;
+    for (let c = 13; c <= 18; c++) grid[12][c] = 1;
+    for (let c = 1; c <= 6; c++)  grid[22][c] = 1;
+    for (let c = 13; c <= 18; c++) grid[22][c] = 1;
+
+    [[6,10],[10,5],[10,15],[16,9],[16,11],[20,4],[20,16],[27,8],[27,13]]
+      .forEach(([r, c]) => { if (!grid[r][c]) grid[r][c] = 4; });
+  }
+
+  grid[1][10] = 5; // shelter always at top-centre
   return grid;
 }
 
-// NPC starting positions
-function getNPCSpawns() {
-  return [
-    { r: 3,  c: 4,  type: 'priest' },
-    { r: 3,  c: 14, type: 'priest' },
-    { r: 7,  c: 2,  type: 'priest' },
-    { r: 7,  c: 11, type: 'priest' },
-    { r: 11, c: 7,  type: 'priest' },
-    { r: 23, c: 4,  type: 'priest' },
-    { r: 5,  c: 3,  type: 'garlic' },
-    { r: 5,  c: 16, type: 'garlic' },
-    { r: 9,  c: 5,  type: 'garlic' },
-    { r: 9,  c: 13, type: 'garlic' },
-    { r: 17, c: 5,  type: 'garlic' },
-    { r: 17, c: 14, type: 'garlic' },
-    { r: 6,  c: 10, type: 'plain'  },
-    { r: 13, c: 3,  type: 'plain'  },
-    { r: 15, c: 13, type: 'plain'  },
-    { r: 19, c: 6,  type: 'plain'  },
-    { r: 21, c: 15, type: 'plain'  },
-    { r: 25, c: 8,  type: 'plain'  },
+// NPC starting positions per map variant
+function getNPCSpawns(variant = 0) {
+  const spawns = [
+    // variant 0 — original
+    [
+      { r: 3,  c: 4,  type: 'priest' }, { r: 3,  c: 14, type: 'priest' },
+      { r: 7,  c: 2,  type: 'priest' }, { r: 7,  c: 11, type: 'priest' },
+      { r: 11, c: 7,  type: 'priest' }, { r: 23, c: 4,  type: 'priest' },
+      { r: 5,  c: 3,  type: 'garlic' }, { r: 5,  c: 16, type: 'garlic' },
+      { r: 9,  c: 5,  type: 'garlic' }, { r: 9,  c: 13, type: 'garlic' },
+      { r: 17, c: 5,  type: 'garlic' }, { r: 17, c: 14, type: 'garlic' },
+      { r: 6,  c: 10, type: 'plain'  }, { r: 13, c: 3,  type: 'plain'  },
+      { r: 15, c: 13, type: 'plain'  }, { r: 19, c: 6,  type: 'plain'  },
+      { r: 21, c: 15, type: 'plain'  }, { r: 25, c: 8,  type: 'plain'  },
+    ],
+    // variant 1 — dense chokepoints
+    [
+      { r: 4,  c: 9,  type: 'priest' }, { r: 4,  c: 11, type: 'priest' },
+      { r: 8,  c: 2,  type: 'priest' }, { r: 8,  c: 17, type: 'priest' },
+      { r: 16, c: 10, type: 'priest' }, { r: 24, c: 9,  type: 'priest' },
+      { r: 7,  c: 3,  type: 'garlic' }, { r: 7,  c: 17, type: 'garlic' },
+      { r: 12, c: 3,  type: 'garlic' }, { r: 12, c: 18, type: 'garlic' },
+      { r: 19, c: 5,  type: 'garlic' }, { r: 19, c: 16, type: 'garlic' },
+      { r: 6,  c: 11, type: 'plain'  }, { r: 11, c: 6,  type: 'plain'  },
+      { r: 14, c: 12, type: 'plain'  }, { r: 20, c: 9,  type: 'plain'  },
+      { r: 23, c: 5,  type: 'plain'  }, { r: 27, c: 14, type: 'plain'  },
+    ],
+    // variant 2 — open centre
+    [
+      { r: 3,  c: 5,  type: 'priest' }, { r: 3,  c: 15, type: 'priest' },
+      { r: 7,  c: 10, type: 'priest' }, { r: 13, c: 9,  type: 'priest' },
+      { r: 18, c: 4,  type: 'priest' }, { r: 23, c: 14, type: 'priest' },
+      { r: 6,  c: 3,  type: 'garlic' }, { r: 6,  c: 17, type: 'garlic' },
+      { r: 11, c: 7,  type: 'garlic' }, { r: 11, c: 12, type: 'garlic' },
+      { r: 17, c: 9,  type: 'garlic' }, { r: 21, c: 15, type: 'garlic' },
+      { r: 5,  c: 10, type: 'plain'  }, { r: 10, c: 4,  type: 'plain'  },
+      { r: 13, c: 14, type: 'plain'  }, { r: 18, c: 11, type: 'plain'  },
+      { r: 23, c: 5,  type: 'plain'  }, { r: 26, c: 10, type: 'plain'  },
+    ],
   ];
+  return spawns[variant] || spawns[0];
 }
 
 // ─── SCENES ──────────────────────────────────────────────────────────────────
@@ -256,20 +316,29 @@ class BootScene extends Phaser.Scene {
 class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
 
+  init(data = {}) {
+    this.nightNumber      = data.nightNumber      || 1;
+    this.accumulatedScore = data.accumulatedScore || 0;
+    this.lives            = data.lives            !== undefined ? data.lives : MAX_LIVES;
+  }
+
   create() {
     this.cameras.main.setBackgroundColor('#000000');
 
-    this.lives = MAX_LIVES;
+    // Per-night difficulty
+    this.effectiveDuration = Math.max(40, SUNRISE_DURATION - (this.nightNumber - 1) * 6);
+    this.npcSpeedMult      = 1 + (this.nightNumber - 1) * 0.12;
+
     this.garlicHits = 0;
-    this.timeLeft = SUNRISE_DURATION;
+    this.timeLeft = this.effectiveDuration;
     this.gameOver = false;
-    this.won = false;
     this.invincible = false;
     this.syringesCollected = 0;
     this.glamouredEver = 0;
     this.livesLost = 0;
 
-    this.levelData = buildLevelData();
+    const mapVariant = Math.floor((this.nightNumber - 1) / 5) % 3;
+    this.levelData = buildLevelData(mapVariant);
     this.buildWorld();
     this.spawnPlayer();
     this.spawnNPCs();
@@ -336,7 +405,8 @@ class GameScene extends Phaser.Scene {
     this.npcs = [];
     this.npcGroup = this.physics.add.group();
 
-    getNPCSpawns().forEach(({ r, c, type }) => {
+    const mapVariant = Math.floor((this.nightNumber - 1) / 5) % 3;
+    getNPCSpawns(mapVariant).forEach(({ r, c, type }) => {
       const x = c * TILE + TILE / 2;
       const y = r * TILE + TILE / 2;
       const texKey = type === 'priest' ? 'npc_priest' : type === 'garlic' ? 'npc_garlic' : 'npc_plain';
@@ -345,7 +415,7 @@ class GameScene extends Phaser.Scene {
       this.npcGroup.add(sprite);
       this.physics.add.collider(sprite, this.walls);
 
-      const npc = { sprite, type, glamoured: false, dirTimer: Phaser.Math.Between(400, 1800), dx: 0, dy: 0, stunned: false, stunTimer: 0 };
+      const npc = { sprite, type, glamoured: false, dirTimer: Phaser.Math.Between(400, 1800), dx: 0, dy: 0, stunned: false, stunTimer: 0, speedMult: this.npcSpeedMult };
       this.pickDirection(npc);
       this.npcs.push(npc);
     });
@@ -410,7 +480,8 @@ class GameScene extends Phaser.Scene {
         this.pickDirection(npc);
       }
 
-      const speed = npc.glamoured ? NPC_SPEED * 1.3 : npc.type === 'priest' ? PRIEST_SPEED : NPC_SPEED;
+      const base  = npc.glamoured ? NPC_SPEED * 1.3 : npc.type === 'priest' ? PRIEST_SPEED : NPC_SPEED;
+      const speed = base * npc.speedMult;
       npc.sprite.setVelocity(npc.dx * speed, npc.dy * speed);
       if (npc.dx < 0) npc.sprite.setFlipX(true);
       else if (npc.dx > 0) npc.sprite.setFlipX(false);
@@ -480,6 +551,10 @@ class GameScene extends Phaser.Scene {
     this.glamourText = this.add.text(GAME_W / 2, 50, '', {
       fontFamily: 'Georgia, serif', fontSize: '13px', color: '#dd44ff', stroke: '#000', strokeThickness: 2,
     }).setScrollFactor(0).setDepth(10).setOrigin(0.5, 0);
+
+    this.add.text(GAME_W - 10, GAME_H - 10, 'NIGHT ' + this.nightNumber, {
+      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#556677', stroke: '#000', strokeThickness: 2,
+    }).setScrollFactor(0).setDepth(10).setOrigin(1, 1);
 
     this.updateUI();
   }
@@ -576,7 +651,7 @@ class GameScene extends Phaser.Scene {
 
   reachShelter() {
     if (this.gameOver) return;
-    this.triggerWin();
+    this.triggerNightComplete();
   }
 
   // ── Lives ──────────────────────────────────────────────────────────────────
@@ -608,8 +683,8 @@ class GameScene extends Phaser.Scene {
   }
 
   updateSunlight() {
-    const elapsed = SUNRISE_DURATION - this.timeLeft;
-    this.sunlightHeight = (elapsed / SUNRISE_DURATION) * MAP_H;
+    const elapsed = this.effectiveDuration - this.timeLeft;
+    this.sunlightHeight = (elapsed / this.effectiveDuration) * MAP_H;
     this.sunlightGraphic.clear();
     if (this.sunlightHeight > 0) {
       for (let i = 0; i < 8; i++) {
@@ -624,9 +699,8 @@ class GameScene extends Phaser.Scene {
 
   // ── End states ─────────────────────────────────────────────────────────────
 
-  calculateScore() {
-    let s = 0;
-    if (this.won) s += 2000;
+  calculateNightScore() {
+    let s = this.nightNumber * 500;          // night completion bonus
     s += this.timeLeft * 15;
     s += this.syringesCollected * 300;
     s += this.glamouredEver * 150;
@@ -634,11 +708,27 @@ class GameScene extends Phaser.Scene {
     return Math.max(0, s);
   }
 
-  triggerWin() {
-    this.gameOver = true; this.won = true;
+  triggerNightComplete() {
+    this.gameOver = true;
     this.player.setVelocity(0, 0);
     this.cameras.main.flash(500, 100, 100, 0);
-    this.time.delayedCall(1500, () => this.scene.start('Score', { score: this.calculateScore(), won: true }));
+
+    const nightScore = this.calculateNightScore();
+    const total      = this.accumulatedScore + nightScore;
+
+    this.add.text(GAME_W / 2, GAME_H / 2,
+      'NIGHT ' + this.nightNumber + '\nSURVIVED\n+' + nightScore, {
+        fontFamily: 'Georgia, serif', fontSize: '30px', color: '#ffdd44',
+        stroke: '#000', strokeThickness: 5, align: 'center',
+      }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5);
+
+    this.time.delayedCall(1800, () => {
+      this.scene.start('Game', {
+        nightNumber:      this.nightNumber + 1,
+        accumulatedScore: total,
+        lives:            this.lives,
+      });
+    });
   }
 
   triggerLose(reason) {
@@ -651,7 +741,10 @@ class GameScene extends Phaser.Scene {
       fontFamily: 'Georgia, serif', fontSize: '28px', color: '#ff2222',
       stroke: '#000', strokeThickness: 4, align: 'center',
     }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5);
-    this.time.delayedCall(1800, () => this.scene.start('Score', { score: this.calculateScore(), won: false }));
+    const total = this.accumulatedScore + this.calculateNightScore();
+    this.time.delayedCall(1800, () =>
+      this.scene.start('Score', { score: total, nights: this.nightNumber })
+    );
   }
 
   // ── Update loop ────────────────────────────────────────────────────────────
@@ -678,31 +771,35 @@ class ScoreScene extends Phaser.Scene {
   constructor() { super('Score'); }
 
   init(data) {
-    this.finalScore = data.score || 0;
-    this.won = data.won || false;
+    this.finalScore = data.score  || 0;
+    this.nights     = data.nights || 1;
     this.playerName = '';
-    this.submitted = false;
+    this.submitted  = false;
   }
 
   create() {
     this.cameras.main.setBackgroundColor('#0a0a14');
     const cx = GAME_W / 2;
+    const survived = this.nights - 1;
 
-    // Result title
-    this.add.text(cx, 55, this.won ? 'SUNRISE SURVIVED' : 'YOU PERISH', {
+    this.add.text(cx, 38, 'YOU PERISH', {
       fontFamily: 'Georgia, serif', fontSize: '30px',
-      color: this.won ? '#ffdd44' : '#ff2222', stroke: '#000', strokeThickness: 4,
+      color: '#ff2222', stroke: '#000', strokeThickness: 4,
     }).setOrigin(0.5, 0.5);
 
-    this.add.text(cx, 100, 'SCORE  ' + String(this.finalScore).padStart(6, '0'), {
+    this.add.text(cx, 76, survived > 0 ? 'Survived ' + survived + ' night' + (survived === 1 ? '' : 's') : 'Night 1 — no shelter', {
+      fontFamily: 'Georgia, serif', fontSize: '16px', color: '#aaaaff', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5, 0.5);
+
+    this.add.text(cx, 110, 'SCORE  ' + String(this.finalScore).padStart(6, '0'), {
       fontFamily: 'Courier New, monospace', fontSize: '24px', color: '#ffffff', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5, 0.5);
 
-    this.add.text(cx, 138, 'ENTER YOUR NAME', {
+    this.add.text(cx, 145, 'ENTER YOUR NAME', {
       fontFamily: 'Georgia, serif', fontSize: '15px', color: '#aaaaaa',
     }).setOrigin(0.5, 0.5);
 
-    this.nameDisplay = this.add.text(cx, 172, this.getNameDisplay(), {
+    this.nameDisplay = this.add.text(cx, 180, this.getNameDisplay(), {
       fontFamily: 'Courier New, monospace', fontSize: '30px', color: '#ffdd44', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5, 0.5);
 
