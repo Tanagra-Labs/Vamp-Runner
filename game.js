@@ -82,51 +82,67 @@ class BootScene extends Phaser.Scene {
   makeTextures() {
     const g = this.make.graphics({ x: 0, y: 0, add: false });
 
-    // Floor tile
+    // Floor — city asphalt
     g.clear();
-    g.fillStyle(0x1a1a2e);
+    g.fillStyle(0x1c1f26);
     g.fillRect(0, 0, TILE, TILE);
-    g.lineStyle(1, 0x16213e, 1);
+    g.lineStyle(1, 0x252a35, 1);
     g.strokeRect(0, 0, TILE, TILE);
+    g.lineStyle(1, 0x23272e, 0.6);
+    g.lineBetween(TILE / 2, 0, TILE / 2, TILE);
+    g.lineBetween(0, TILE / 2, TILE, TILE / 2);
     g.generateTexture('floor', TILE, TILE);
 
-    // Wall tile
+    // Wall — building facade with lit windows
     g.clear();
-    g.fillStyle(0x0f0f1a);
+    g.fillStyle(0x0e1118);
     g.fillRect(0, 0, TILE, TILE);
-    g.fillStyle(0x1c1c30);
+    g.fillStyle(0x141820);
     g.fillRect(2, 2, TILE - 4, TILE - 4);
-    g.lineStyle(1, 0x2a2a4a, 1);
-    g.strokeRect(2, 2, TILE - 4, TILE - 4);
+    g.fillStyle(0xffdd88, 0.7);
+    g.fillRect(6, 6, 8, 6);
+    g.fillRect(22, 6, 8, 6);
+    g.fillRect(6, 22, 8, 6);
+    g.fillRect(22, 22, 8, 6);
     g.generateTexture('wall', TILE, TILE);
 
-    // Cross obstacle
+    // Cross obstacle (unchanged — still used in current GameScene)
     g.clear();
-    g.fillStyle(0x1a1a2e);
+    g.fillStyle(0x1c1f26);
     g.fillRect(0, 0, TILE, TILE);
     g.fillStyle(0xc0c0c0);
-    // vertical bar
     g.fillRect(17, 6, 6, 28);
-    // horizontal bar
     g.fillRect(8, 12, 24, 6);
     g.generateTexture('cross', TILE, TILE);
 
-    // Garlic
+    // Garlic — proper bulb with cloves and green stem
     g.clear();
-    g.fillStyle(0x1a1a2e);
+    g.fillStyle(0x1c1f26);
     g.fillRect(0, 0, TILE, TILE);
-    g.fillStyle(0xd4e6a5);
-    g.fillCircle(20, 22, 9);
-    g.fillStyle(0xb8cc8a);
-    g.fillCircle(14, 17, 6);
-    g.fillCircle(26, 17, 6);
-    g.fillStyle(0x8fae6b);
-    g.fillRect(18, 6, 4, 10);
+    // papery outer skin
+    g.fillStyle(0xfaf0e6);
+    g.fillCircle(20, 24, 11);
+    // clove sections
+    g.fillStyle(0xe8d8c0);
+    g.fillCircle(14, 22, 6);
+    g.fillCircle(26, 22, 6);
+    g.fillCircle(20, 29, 6);
+    // clove division lines
+    g.lineStyle(1, 0xccb090, 1);
+    g.lineBetween(20, 14, 20, 32);
+    g.lineBetween(11, 20, 29, 28);
+    g.lineBetween(11, 28, 29, 20);
+    // stem
+    g.fillStyle(0x6a8e4e);
+    g.fillRect(18, 5, 4, 12);
+    // base wrapper
+    g.fillStyle(0xd4c4a0);
+    g.fillEllipse(20, 15, 14, 6);
     g.generateTexture('garlic', TILE, TILE);
 
     // Blood syringe
     g.clear();
-    g.fillStyle(0x1a1a2e);
+    g.fillStyle(0x1c1f26);
     g.fillRect(0, 0, TILE, TILE);
     g.fillStyle(0x888888);
     g.fillRect(14, 8, 12, 6);
@@ -138,7 +154,7 @@ class BootScene extends Phaser.Scene {
 
     // Shelter (coffin)
     g.clear();
-    g.fillStyle(0x1a1a2e);
+    g.fillStyle(0x1c1f26);
     g.fillRect(0, 0, TILE, TILE);
     g.fillStyle(0x3d1c02);
     g.fillRect(6, 4, 28, 32);
@@ -158,16 +174,68 @@ class BootScene extends Phaser.Scene {
     g.fillRect(4, 20, 24, 12);
     g.fillStyle(0x8b0000);
     g.fillRect(10, 21, 12, 4);
-    // Cape
     g.fillStyle(0x1a0030);
     g.fillTriangle(4, 22, 16, 32, 28, 22);
     g.generateTexture('player', 32, 32);
 
-    // Sunlight overlay (warm orange strip)
+    // NPC: Priest — black robe, pale face, holds cross
     g.clear();
-    g.fillStyle(0xffa500, 0.7);
-    g.fillRect(0, 0, MAP_W, 4);
-    g.generateTexture('sunstrip', MAP_W, 4);
+    g.fillStyle(0x111111);
+    g.fillRect(8, 14, 16, 18);
+    g.fillEllipse(16, 28, 20, 10);
+    g.fillStyle(0xf0d0a0);
+    g.fillCircle(16, 10, 7);
+    // collar
+    g.fillStyle(0xffffff);
+    g.fillRect(13, 16, 6, 4);
+    // cross held out to the side
+    g.fillStyle(0xd4aa70);
+    g.fillRect(25, 15, 4, 14);
+    g.fillRect(21, 19, 12, 4);
+    g.generateTexture('npc_priest', 32, 32);
+
+    // NPC: Garlic civilian — neutral clothes, carries garlic bundle
+    g.clear();
+    g.fillStyle(0x4a5568);
+    g.fillRect(9, 14, 14, 16);
+    g.fillEllipse(16, 28, 18, 10);
+    g.fillStyle(0xf0c8a0);
+    g.fillCircle(16, 10, 7);
+    g.fillRect(4, 16, 6, 4);
+    // garlic bundle
+    g.fillStyle(0xfaf0e6);
+    g.fillCircle(26, 20, 6);
+    g.fillStyle(0x6a8e4e);
+    g.fillRect(25, 14, 2, 6);
+    g.generateTexture('npc_garlic', 32, 32);
+
+    // NPC: Plain civilian — blue-grey, no hazard
+    g.clear();
+    g.fillStyle(0x3d5a80);
+    g.fillRect(9, 14, 14, 16);
+    g.fillEllipse(16, 28, 18, 10);
+    g.fillStyle(0xf0c8a0);
+    g.fillCircle(16, 10, 7);
+    g.fillRect(4, 16, 6, 4);
+    g.fillRect(22, 16, 6, 4);
+    g.generateTexture('npc_plain', 32, 32);
+
+    // NPC: Glamoured civilian — purple aura, glowing eyes
+    g.clear();
+    g.fillStyle(0x6600aa, 0.3);
+    g.fillCircle(16, 16, 16);
+    g.fillStyle(0x6644aa);
+    g.fillRect(9, 14, 14, 16);
+    g.fillEllipse(16, 28, 18, 10);
+    g.fillStyle(0xf0c8a0);
+    g.fillCircle(16, 10, 7);
+    g.fillRect(4, 16, 6, 4);
+    g.fillRect(22, 16, 6, 4);
+    // glowing eyes
+    g.fillStyle(0xff44ff);
+    g.fillCircle(13, 10, 2);
+    g.fillCircle(19, 10, 2);
+    g.generateTexture('npc_glamoured', 32, 32);
 
     g.destroy();
   }
