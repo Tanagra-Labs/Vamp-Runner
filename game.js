@@ -256,20 +256,29 @@ class BootScene extends Phaser.Scene {
 class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
 
+  init(data = {}) {
+    this.nightNumber      = data.nightNumber      || 1;
+    this.accumulatedScore = data.accumulatedScore || 0;
+    this.lives            = data.lives            !== undefined ? data.lives : MAX_LIVES;
+  }
+
   create() {
     this.cameras.main.setBackgroundColor('#000000');
 
-    this.lives = MAX_LIVES;
+    // Per-night difficulty
+    this.effectiveDuration = Math.max(40, SUNRISE_DURATION - (this.nightNumber - 1) * 6);
+    this.npcSpeedMult      = 1 + (this.nightNumber - 1) * 0.12;
+
     this.garlicHits = 0;
-    this.timeLeft = SUNRISE_DURATION;
+    this.timeLeft = this.effectiveDuration;
     this.gameOver = false;
-    this.won = false;
     this.invincible = false;
     this.syringesCollected = 0;
     this.glamouredEver = 0;
     this.livesLost = 0;
 
-    this.levelData = buildLevelData();
+    const mapVariant = Math.floor((this.nightNumber - 1) / 5) % 3;
+    this.levelData = buildLevelData(mapVariant);
     this.buildWorld();
     this.spawnPlayer();
     this.spawnNPCs();
@@ -345,7 +354,7 @@ class GameScene extends Phaser.Scene {
       this.npcGroup.add(sprite);
       this.physics.add.collider(sprite, this.walls);
 
-      const npc = { sprite, type, glamoured: false, dirTimer: Phaser.Math.Between(400, 1800), dx: 0, dy: 0, stunned: false, stunTimer: 0 };
+      const npc = { sprite, type, glamoured: false, dirTimer: Phaser.Math.Between(400, 1800), dx: 0, dy: 0, stunned: false, stunTimer: 0, speedMult: this.npcSpeedMult };
       this.pickDirection(npc);
       this.npcs.push(npc);
     });
@@ -410,7 +419,8 @@ class GameScene extends Phaser.Scene {
         this.pickDirection(npc);
       }
 
-      const speed = npc.glamoured ? NPC_SPEED * 1.3 : npc.type === 'priest' ? PRIEST_SPEED : NPC_SPEED;
+      const base  = npc.glamoured ? NPC_SPEED * 1.3 : npc.type === 'priest' ? PRIEST_SPEED : NPC_SPEED;
+      const speed = base * npc.speedMult;
       npc.sprite.setVelocity(npc.dx * speed, npc.dy * speed);
       if (npc.dx < 0) npc.sprite.setFlipX(true);
       else if (npc.dx > 0) npc.sprite.setFlipX(false);
@@ -480,6 +490,10 @@ class GameScene extends Phaser.Scene {
     this.glamourText = this.add.text(GAME_W / 2, 50, '', {
       fontFamily: 'Georgia, serif', fontSize: '13px', color: '#dd44ff', stroke: '#000', strokeThickness: 2,
     }).setScrollFactor(0).setDepth(10).setOrigin(0.5, 0);
+
+    this.add.text(GAME_W - 10, GAME_H - 10, 'NIGHT ' + this.nightNumber, {
+      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#556677', stroke: '#000', strokeThickness: 2,
+    }).setScrollFactor(0).setDepth(10).setOrigin(1, 1);
 
     this.updateUI();
   }
@@ -576,7 +590,7 @@ class GameScene extends Phaser.Scene {
 
   reachShelter() {
     if (this.gameOver) return;
-    this.triggerWin();
+    this.triggerNightComplete();
   }
 
   // ── Lives ──────────────────────────────────────────────────────────────────
@@ -608,8 +622,8 @@ class GameScene extends Phaser.Scene {
   }
 
   updateSunlight() {
-    const elapsed = SUNRISE_DURATION - this.timeLeft;
-    this.sunlightHeight = (elapsed / SUNRISE_DURATION) * MAP_H;
+    const elapsed = this.effectiveDuration - this.timeLeft;
+    this.sunlightHeight = (elapsed / this.effectiveDuration) * MAP_H;
     this.sunlightGraphic.clear();
     if (this.sunlightHeight > 0) {
       for (let i = 0; i < 8; i++) {
@@ -624,9 +638,8 @@ class GameScene extends Phaser.Scene {
 
   // ── End states ─────────────────────────────────────────────────────────────
 
-  calculateScore() {
-    let s = 0;
-    if (this.won) s += 2000;
+  calculateNightScore() {
+    let s = this.nightNumber * 500;          // night completion bonus
     s += this.timeLeft * 15;
     s += this.syringesCollected * 300;
     s += this.glamouredEver * 150;
@@ -634,11 +647,27 @@ class GameScene extends Phaser.Scene {
     return Math.max(0, s);
   }
 
-  triggerWin() {
-    this.gameOver = true; this.won = true;
+  triggerNightComplete() {
+    this.gameOver = true;
     this.player.setVelocity(0, 0);
     this.cameras.main.flash(500, 100, 100, 0);
-    this.time.delayedCall(1500, () => this.scene.start('Score', { score: this.calculateScore(), won: true }));
+
+    const nightScore = this.calculateNightScore();
+    const total      = this.accumulatedScore + nightScore;
+
+    this.add.text(GAME_W / 2, GAME_H / 2,
+      'NIGHT ' + this.nightNumber + '\nSURVIVED\n+' + nightScore, {
+        fontFamily: 'Georgia, serif', fontSize: '30px', color: '#ffdd44',
+        stroke: '#000', strokeThickness: 5, align: 'center',
+      }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5);
+
+    this.time.delayedCall(1800, () => {
+      this.scene.start('Game', {
+        nightNumber:      this.nightNumber + 1,
+        accumulatedScore: total,
+        lives:            this.lives,
+      });
+    });
   }
 
   triggerLose(reason) {
@@ -651,7 +680,10 @@ class GameScene extends Phaser.Scene {
       fontFamily: 'Georgia, serif', fontSize: '28px', color: '#ff2222',
       stroke: '#000', strokeThickness: 4, align: 'center',
     }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5);
-    this.time.delayedCall(1800, () => this.scene.start('Score', { score: this.calculateScore(), won: false }));
+    const total = this.accumulatedScore + this.calculateNightScore();
+    this.time.delayedCall(1800, () =>
+      this.scene.start('Score', { score: total, nights: this.nightNumber })
+    );
   }
 
   // ── Update loop ────────────────────────────────────────────────────────────
@@ -678,31 +710,35 @@ class ScoreScene extends Phaser.Scene {
   constructor() { super('Score'); }
 
   init(data) {
-    this.finalScore = data.score || 0;
-    this.won = data.won || false;
+    this.finalScore = data.score  || 0;
+    this.nights     = data.nights || 1;
     this.playerName = '';
-    this.submitted = false;
+    this.submitted  = false;
   }
 
   create() {
     this.cameras.main.setBackgroundColor('#0a0a14');
     const cx = GAME_W / 2;
+    const survived = this.nights - 1;
 
-    // Result title
-    this.add.text(cx, 55, this.won ? 'SUNRISE SURVIVED' : 'YOU PERISH', {
+    this.add.text(cx, 38, 'YOU PERISH', {
       fontFamily: 'Georgia, serif', fontSize: '30px',
-      color: this.won ? '#ffdd44' : '#ff2222', stroke: '#000', strokeThickness: 4,
+      color: '#ff2222', stroke: '#000', strokeThickness: 4,
     }).setOrigin(0.5, 0.5);
 
-    this.add.text(cx, 100, 'SCORE  ' + String(this.finalScore).padStart(6, '0'), {
+    this.add.text(cx, 76, survived > 0 ? 'Survived ' + survived + ' night' + (survived === 1 ? '' : 's') : 'Night 1 — no shelter', {
+      fontFamily: 'Georgia, serif', fontSize: '16px', color: '#aaaaff', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5, 0.5);
+
+    this.add.text(cx, 110, 'SCORE  ' + String(this.finalScore).padStart(6, '0'), {
       fontFamily: 'Courier New, monospace', fontSize: '24px', color: '#ffffff', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5, 0.5);
 
-    this.add.text(cx, 138, 'ENTER YOUR NAME', {
+    this.add.text(cx, 145, 'ENTER YOUR NAME', {
       fontFamily: 'Georgia, serif', fontSize: '15px', color: '#aaaaaa',
     }).setOrigin(0.5, 0.5);
 
-    this.nameDisplay = this.add.text(cx, 172, this.getNameDisplay(), {
+    this.nameDisplay = this.add.text(cx, 180, this.getNameDisplay(), {
       fontFamily: 'Courier New, monospace', fontSize: '30px', color: '#ffdd44', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5, 0.5);
 
