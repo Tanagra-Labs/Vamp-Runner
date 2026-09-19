@@ -1,26 +1,109 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Vampire Runner</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      width: 100vw;
-      height: 100dvh;
-      overflow: hidden;
-      touch-action: none;
-    }
-    canvas { display: block; max-width: 100%; max-height: 100%; }
-  </style>
-</head>
-<body>
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
-  <script src="game.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b1018" />
+    <meta
+      name="description"
+      content="Three coffins. One more night. Escape the waking city in Vamp Runner, a gothic arcade game from Tanagra Labs."
+    />
+    <title>Vamp Runner · Tanagra Labs</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="arcade" aria-label="Vamp Runner">
+      <aside class="introduction">
+        <p class="eyebrow">TANAGRA LABS / ARCADE 01</p>
+        <h1>Dawn waits<br />for no one.</h1>
+        <p class="lede">
+          A little blood.<br />A little charm.<br />Another night alive.
+        </p>
+        <div class="rule"></div>
+        <p class="small">
+          A nocturnal escape through a city<br />that has no love for the
+          undead.
+        </p>
+        <p class="edition">THE NIGHTFALL EDITION</p>
+      </aside>
+      <section class="cabinet" aria-label="Game">
+        <div
+          id="game"
+          tabindex="0"
+          aria-label="Vamp Runner game. Enter starts, arrow keys or WASD move, Space dashes, E charms, Escape pauses."
+        >
+          <div id="loading" role="status">
+            <span class="eyebrow">THE CITY IS SLEEPING</span>
+            <h2>Vamp Runner</h2>
+            <p>Preparing the night…</p>
+          </div>
+        </div>
+      </section>
+      <aside class="field-guide">
+        <p class="eyebrow">A GUIDE TO THE NIGHT</p>
+        <div class="legend">
+          <span class="symbol crypt">◇</span>
+          <div>
+            <h2>Find your crypt</h2>
+            <p>The green marker is home.<br />Get there before sunrise.</p>
+          </div>
+        </div>
+        <div class="legend">
+          <span class="symbol blood">✧</span>
+          <div>
+            <h2>Take what you need</h2>
+            <p>Blood heals garlic damage<br />and recharges your dash.</p>
+          </div>
+        </div>
+        <div class="legend">
+          <span class="symbol ally">○</span>
+          <div>
+            <h2>Make a little company</h2>
+            <p>Charmed civilians collect blood<br />and stun nearby hunters.</p>
+          </div>
+        </div>
+        <div class="rule"></div>
+        <dl class="controls">
+          <div>
+            <dt>Move</dt>
+            <dd>↑ ↓ ← → / WASD</dd>
+          </div>
+          <div>
+            <dt>Dash</dt>
+            <dd>SPACE / SHIFT</dd>
+          </div>
+          <div>
+            <dt>Charm</dt>
+            <dd>E</dd>
+          </div>
+          <div>
+            <dt>Pause</dt>
+            <dd>ESC / P</dd>
+          </div>
+        </dl>
+        <p class="small">
+          On touchscreens, drag to move and<br />use the Dash and Charm
+          buttons.<br />ZQSD keyboards welcome, too.
+        </p>
+      </aside>
+    </main>
+    <p
+      id="game-status"
+      class="sr-only"
+      aria-live="polite"
+      aria-atomic="true"
+    ></p>
+    <noscript
+      ><p class="load-error">Vamp Runner needs JavaScript to play.</p></noscript
+    >
+    <script
+      src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"
+      onerror="document.getElementById('loading').innerHTML='<h2>The night is out of reach.</h2><p>The game engine could not load. Check your connection and reload this page.</p>'"
+    ></script>
+    <script src="rules.js"></script>
+    <script src="game.js"></script>
+  </body>
 </html>
