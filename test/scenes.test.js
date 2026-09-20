@@ -2,214 +2,130 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadGame } = require("./scene-harness");
 const R = require("../rules");
-function run(night = 1) {
-  const harness = loadGame();
-  const scene = harness.wire(new harness.GameScene());
-  scene.init({ nightNumber: night });
-  scene.create();
-  return { scene, harness };
+function run(data = {}) {
+  const h = loadGame(), scene = h.wire(new h.GameScene());
+  scene.init(data); scene.create(); return { h, scene };
 }
 
-for (let night = 1; night <= 3; night++)
-  test(`night ${night} builds without overlapping NPC spawns or wall spawns`, () => {
-    const { scene } = run(night),
-      occupied = new Set();
-    for (const npc of scene.npcs) {
-      const row = Math.floor(npc.sprite.y / 40),
-        col = Math.floor(npc.sprite.x / 40),
-        key = row + "," + col;
-      assert.notEqual(scene.levelData[row][col], 1);
-      assert.ok(!occupied.has(key));
-      occupied.add(key);
-    }
-    assert.equal(scene.npcs.length, 18);
-    assert.equal(scene.physics.overlaps.length, 3);
-    assert.equal(scene.timerBar.width, 342);
-    assert.equal(scene.physics.paused, false);
-  });
-
-test("keyboard movement supports diagonals and ZQSD, and stopping clears velocity", () => {
-  const { scene } = run();
-  scene.keys.Z.isDown = true;
-  scene.keys.D.isDown = true;
-  scene.update(100, 16);
-  assert.ok(
-    Math.abs(
-      Math.hypot(...Object.values(scene.player.body.velocity)) - R.PLAYER_SPEED,
-    ) < 0.0001,
-  );
-  assert.ok(scene.player.body.velocity.y < 0);
-  scene.keys.Z.isDown = false;
-  scene.keys.D.isDown = false;
-  scene.keys.Q.isDown = true;
-  scene.update(116, 16);
-  assert.equal(scene.player.body.velocity.x, -R.PLAYER_SPEED);
-  scene.input.keyboard.resetKeys();
-  scene.update(132, 16);
-  assert.equal(scene.player.body.velocity.x, 0);
+test("menu, textures and gameplay construct through the scene adapter", () => {
+  const h = loadGame();
+  const boot = h.wire(new h.BootScene()); boot.create();
+  const menu = h.wire(new h.MenuScene()); menu.create();
+  const { scene } = run(); scene.update(16, 16);
+  assert.equal(scene.world.status, "playing");
 });
 
-test("dash blocks hunter damage, has a cooldown, and does not leave permanent immunity", () => {
-  const { scene } = run(),
-    priest = scene.npcs.find((n) => n.type === "priest");
-  scene.startDash();
-  const cooldown = scene.dashCooldown;
-  scene.startDash();
-  assert.equal(scene.dashCooldown, cooldown);
-  scene.touchNPC(priest);
-  assert.equal(scene.lives, 3);
-  for (let i = 0; i < 5; i++) scene.update(i * 50, 50);
-  scene.touchNPC(priest);
-  assert.equal(scene.lives, 2);
-  scene.touchNPC(priest);
-  assert.equal(scene.lives, 2);
-});
-
-test("stunned priests cannot hurt the player and allies cannot cause garlic damage", () => {
-  const { scene } = run(),
-    priest = scene.npcs.find((n) => n.type === "priest"),
-    garlic = scene.npcs.find((n) => n.type === "garlic");
-  priest.stunTimer = 1000;
-  scene.touchNPC(priest);
-  assert.equal(scene.lives, 3);
-  garlic.glamoured = true;
-  scene.touchNPC(garlic);
-  assert.equal(scene.garlicHits, 0);
-});
-
-test("three separate garlic hits cost one coffin; blood heals and recharges dash once", () => {
-  const { scene } = run(),
-    garlic = scene.npcs.find((n) => n.type === "garlic");
-  for (let i = 0; i < 3; i++) {
-    scene.invulnerableFor = 0;
-    scene.touchNPC(garlic);
+test("Next Night works by tapping after scrolling, carries progress and allows repeated nights", () => {
+  const { h, scene } = run();
+  const crypt = new h.CryptScene();
+  for (let n = 1; n <= 5; n++) {
+    scene.world.player.x = scene.world.level.crypt.x;
+    scene.update(100, 16);
+    assert.equal(scene.transitions.length, 1);
+    assert.equal(scene.transitions[0].name, "Crypt");
+    assert.ok(scene.cameras.main.scrollX > 2000);
+    const data = scene.transitions[0].data;
+    scene.events.emit("shutdown");
+    assert.equal(h.windowEvents.listenerCount("blur"), 0);
+    h.wire(crypt); crypt.init(data); crypt.create();
+    assert.equal(crypt.cameras.main.scrollX, 0);
+    assert.equal(h.tap(crypt, 195, 724), crypt.next.bg);
+    h.tap(crypt, 195, 724); crypt.input.keyboard.emit("keydown-ENTER");
+    assert.equal(crypt.transitions.length, 1, "double taps and Enter cannot skip a night");
+    const next = crypt.transitions[0].data;
+    assert.equal(next.nightNumber, n + 1);
+    assert.equal(next.score, data.score);
+    assert.equal(next.lives, 3);
+    crypt.events.emit("shutdown");
+    // Phaser reuses the same scene object, not a new constructor each night.
+    h.wire(scene); scene.init(next); scene.create();
+    assert.equal(scene.world.night, n + 1);
+    assert.equal(scene.transitioning, false);
+    assert.equal(scene.paused, false);
+    assert.equal(scene.world.timeLeft, R.nightSettings(n + 1).duration);
+    scene.keys.D.isDown = true; scene.update(120, 33);
+    assert.ok(scene.world.player.x > 80, "next night accepts movement");
   }
-  assert.equal(scene.lives, 2);
-  assert.equal(scene.garlicHits, 0);
-  scene.garlicHits = 2;
-  scene.dashCooldown = 3;
-  const blood = scene.syringes.getChildren()[0];
-  scene.collectSyringe(scene.player, blood);
-  scene.collectSyringe(scene.player, blood);
-  assert.equal(scene.syringesCollected, 1);
-  assert.equal(scene.garlicHits, 1);
-  assert.equal(scene.dashCooldown, 1.8);
 });
 
-test("glamour requires player proximity and sight, then turns one civilian into a helper", () => {
-  const { scene } = run(),
-    npc = scene.npcs.find((n) => n.type === "plain");
-  scene.player.setPosition(180, 140);
-  npc.sprite.setPosition(180, 220);
-  scene.glamourNPC(npc);
-  assert.equal(npc.glamoured, false);
-  npc.sprite.setPosition(700, 700);
-  scene.glamourNPC(npc);
-  assert.equal(npc.glamoured, false);
-  npc.sprite.setPosition(220, 140);
-  scene.glamourNPC(npc);
-  scene.glamourNPC(npc);
-  assert.equal(npc.glamoured, true);
-  assert.equal(scene.glamouredEver, 1);
-});
-
-test("touch releases outside the game and a second pointer cannot hijack movement", () => {
-  const { scene } = run();
-  scene.input.emit("pointerdown", { id: 1, x: 80, y: 780 });
-  scene.input.emit("pointermove", { id: 1, x: 100, y: 760 });
-  assert.ok(scene.joystick.dx > 0);
-  scene.input.emit("pointerdown", { id: 2, x: 50, y: 750 });
-  assert.equal(scene.joystick.pointerId, 1);
+test("fixed controls hit their visible positions with camera offsets and support simultaneous fingers", () => {
+  const { h, scene } = run();
+  scene.world.player.x = 1600; scene.renderWorld();
+  h.tap(scene, 124, 774, 1); h.tap(scene, 276, 798, 2);
+  scene.update(100, 16);
+  assert.ok(scene.world.player.vx > 0); assert.ok(scene.world.player.vy < 0);
   scene.input.emit("pointerupoutside", { id: 2 });
-  assert.equal(scene.joystick.active, true);
-  scene.input.emit("pointerupoutside", { id: 1 });
-  assert.equal(scene.joystick.active, false);
-  assert.equal(scene.joystick.dx, 0);
+  assert.equal(scene.held.get(1), 1);
+  scene.input.emit("pointerupoutside", { id: 1 }); assert.equal(scene.held.size, 0);
+  h.tap(scene, 351, 174); assert.equal(scene.paused, true);
+  h.tap(scene, 195, 564); assert.equal(scene.paused, false);
 });
 
-test("pause freezes dawn, physics and cooldowns; resume clears held input; blur listeners clean up", () => {
-  const { scene, harness } = run();
-  scene.keys.W.isDown = true;
-  scene.startDash();
-  scene.input.keyboard.emit("keydown", { code: "Escape", repeat: false });
-  const time = scene.timeLeft,
-    cooldown = scene.dashCooldown;
-  scene.update(10000, 10000);
-  assert.equal(scene.timeLeft, time);
-  assert.equal(scene.dashCooldown, cooldown);
-  assert.equal(scene.physics.paused, true);
-  assert.equal(scene.time.paused, true);
-  assert.equal(scene.keys.W.isDown, false);
-  scene.input.keyboard.emit("keydown", { code: "Escape", repeat: false });
-  assert.equal(scene.physics.paused, false);
-  assert.equal(scene.time.paused, false);
-  harness.windowEvents.emit("blur");
-  assert.equal(scene.paused, true);
+test("pause freezes the actual simulation, clears held inputs and cleans up blur listeners", () => {
+  const { h, scene } = run();
+  scene.keys.D.isDown = true; scene.pending.jump = true;
+  h.windowEvents.emit("blur");
+  const before = JSON.stringify(scene.world);
+  scene.update(10000, 10000); assert.equal(JSON.stringify(scene.world), before);
+  assert.equal(scene.keys.D.isDown, false); assert.deepEqual(Object.keys(scene.pending), []);
+  scene.resumeGame(); scene.update(10050, 16); assert.ok(scene.world.timeLeft < scene.world.level.duration);
   scene.events.emit("shutdown");
-  assert.equal(harness.windowEvents.listenerCount("blur"), 0);
-  assert.equal(harness.documentEvents.listenerCount("visibilitychange"), 0);
+  assert.equal(h.windowEvents.listenerCount("blur"), 0);
+  assert.equal(h.documentEvents.listenerCount("visibilitychange"), 0);
+  assert.equal(scene.input.keyboard.listenerCount("keydown"), 0);
 });
 
-test("night completion freezes every actor, grants one bonus, and next night preserves the run", () => {
-  const { scene } = run(3);
-  scene.lives = 2;
-  scene.timeLeft = 30;
-  scene.npcs[0].sprite.setVelocity(55, 10);
-  scene.triggerNightComplete();
-  const total = scene.accumulatedScore;
-  scene.triggerNightComplete();
-  assert.equal(scene.accumulatedScore, total);
-  assert.equal(scene.lives, 3);
-  assert.equal(scene.npcs[0].sprite.body.velocity.x, 0);
-  assert.equal(scene.physics.paused, true);
-  scene.collectSyringe(scene.player, scene.syringes.getChildren()[0]);
-  assert.equal(scene.syringesCollected, 0);
-  scene.nextNight();
-  assert.equal(scene.transitions[0].data.nightNumber, 4);
-  assert.equal(scene.transitions[0].data.accumulatedScore, total);
+test("touch stun and bite turn a human, and collections persist in browser progress", () => {
+  const { h, scene } = run();
+  scene.world.player.x = scene.world.level.humans[0].x - 25;
+  h.tap(scene, 223, 737); scene.update(16, 16);
+  assert.equal(scene.world.level.humans[0].state, "stunned");
+  h.tap(scene, 329, 737); scene.update(32, 16);
+  assert.equal(scene.world.stats.turned, 1);
+  R.collect(scene.world, scene.world.level.pickups[0]); scene.update(48, 16);
+  const saved = JSON.parse(h.storage.get("vampRunnerProgress"));
+  assert.equal(saved.dirt, scene.world.profile.dirt);
 });
 
-test("sunrise loss is a single transition with zero survival bonus and zero completed nights", () => {
-  const { scene } = run();
-  scene.timeLeft = 0.01;
-  scene.update(100, 50);
-  scene.triggerLose("again");
-  scene.update(150, 50);
-  assert.equal(scene.transitions.length, 1);
-  assert.equal(scene.transitions[0].name, "Score");
-  assert.equal(scene.transitions[0].data.score, 0);
-  assert.equal(scene.transitions[0].data.nights, 0);
+test("crypt purchases and coffin restoration are carried into the next night", () => {
+  const h = loadGame(), crypt = h.wire(new h.CryptScene());
+  crypt.init({ nightNumber: 1, score: 1300, lives: 2, profile: { dirt: 100 }, timeLeft: 30 }); crypt.create();
+  h.tap(crypt, 302, 384); h.tap(crypt, 195, 640);
+  assert.equal(crypt.run.profile.upgrades.stride, 1);
+  assert.equal(crypt.run.profile.dirt, 62); assert.equal(crypt.run.lives, 3);
+  h.tap(crypt, 195, 640); assert.equal(crypt.run.profile.dirt, 62);
+  h.tap(crypt, 195, 724);
+  assert.equal(crypt.transitions[0].data.profile.upgrades.stride, 1);
+  assert.equal(JSON.parse(h.storage.get("vampRunnerProgress")).dirt, 62);
 });
 
-test("score submission is idempotent and preserves existing scores", () => {
+test("sunrise transition runs once and does not leave an invisible input-blocking overlay", () => {
+  const { scene } = run(); scene.world.timeLeft = 0.001;
+  scene.update(1, 16); scene.update(2, 16); scene.showSunrise();
+  assert.equal(scene.time.callbacks.length, 1);
+  scene.time.callbacks[0]();
+  assert.equal(scene.transitions.length, 1); assert.equal(scene.transitions[0].name, "Score");
+  assert.equal(scene.transitions[0].data.nights, 0); assert.equal(scene.transitions[0].data.score, 0);
+});
+
+test("score submission remains idempotent and preserves existing names", () => {
   const h = loadGame();
-  h.storage.set(
-    "vampRunnerScores",
-    JSON.stringify([{ name: "VAL    ", score: 800 }]),
-  );
-  const scene = h.wire(new h.ScoreScene());
-  scene.init({ score: 2000, nights: 2 });
-  scene.create();
-  scene.pressKey("V");
-  scene.submitScore();
-  scene.submitScore();
+  h.storage.set("vampRunnerScores", JSON.stringify([{ name: "VAL    ", score: 800 }]));
+  const scene = h.wire(new h.ScoreScene()); scene.init({ score: 2000, nights: 2 }); scene.create();
+  scene.pressKey("V"); scene.submitScore(); scene.submitScore();
   const scores = JSON.parse(h.storage.get("vampRunnerScores"));
-  assert.equal(scores.length, 2);
-  assert.equal(scores[0].score, 2000);
-  assert.equal(scores[1].name, "VAL");
+  assert.equal(scores.length, 2); assert.equal(scores[0].score, 2000); assert.equal(scores[1].name, "VAL");
 });
 
-test("blocked score storage reports failure without blocking replay", () => {
-  const h = loadGame();
-  h.context.localStorage.setItem = () => {
-    throw Error("storage blocked");
-  };
-  const scene = h.wire(new h.ScoreScene());
-  scene.init({ score: 100 });
-  scene.create();
-  scene.submitScore();
-  assert.equal(scene.submitted, false);
-  assert.equal(scene.save.caption.text, "SAVE UNAVAILABLE");
+test("blocked storage keeps the game playable and carries upgrades through replay", () => {
+  const h = loadGame(); h.context.localStorage.setItem = () => { throw Error("blocked"); };
+  const crypt = h.wire(new h.CryptScene());
+  crypt.init({ nightNumber: 1, score: 500, lives: 3, profile: { dirt: 20 }, timeLeft: 20 }); crypt.create();
+  crypt.buy("stride"); assert.equal(crypt.storageOK, false); crypt.endRun();
+  const scene = h.wire(new h.ScoreScene()); scene.init(crypt.transitions[0].data); scene.create();
+  scene.submitScore(); assert.equal(scene.submitted, false); assert.equal(scene.save.caption.text, "SAVE UNAVAILABLE");
   scene.input.keyboard.emit("keydown", { key: "Enter" });
-  assert.equal(scene.transitions[0].name, "Game");
+  assert.equal(scene.transitions[0].data.profile.upgrades.stride, 1);
+  const menu = h.wire(new h.MenuScene()); menu.create(); menu.startRun();
+  assert.equal(menu.transitions[0].data.profile.upgrades.stride, 1);
 });

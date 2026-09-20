@@ -1,35 +1,11 @@
-// Vamp Runner — Nightfall. Phaser 3.60, generated artwork, no build step.
+// Vamp Runner — a mobile vampire platformer. Phaser 3.60, no build step.
 /* global Phaser, VampRules */
 const {
-  TILE,
-  MAP_COLS,
-  MAP_ROWS,
-  MAP_W,
-  MAP_H,
-  PLAYER_SPEED,
-  GARLIC_HITS_PER_LIFE,
-  MAX_LIVES,
-  NPC_SPEED,
-  PRIEST_SPEED,
-  buildLevelData,
-  getNPCSpawns,
-  nightSettings,
-  timeRatio,
-  sunlightBoundary,
-  nightScore,
-  movementVector,
-  nearestOpenCell,
-  findPath,
-  clearSight,
-  cleanScores,
+  FLOOR, MAX_LIVES, STEP, UPGRADES, createWorld, step,
+  cleanProgress, purchase, targetHuman, cleanScores,
 } = VampRules;
 const GAME_W = 390,
   GAME_H = 844;
-const GLAMOUR_DISTANCE = 112,
-  DASH_SPEED = 480,
-  DASH_LENGTH = 0.19,
-  DASH_COOLDOWN = 3.5;
-const DISTRICTS = ["OLD QUARTER", "CATHEDRAL WARD", "HOLLOW GARDENS"];
 const C = {
   ink: 0x0b1018,
   panel: 0x121c29,
@@ -52,6 +28,7 @@ const Save = {
     }
   },
   write(key, value) {
+    if (key === "vampRunnerProgress") this.sessionProgress = cleanProgress(value);
     try {
       localStorage.setItem(key, JSON.stringify(value));
       return true;
@@ -61,6 +38,9 @@ const Save = {
   },
   scores() {
     return cleanScores(this.read("vampRunnerScores", []));
+  },
+  progress() {
+    return cleanProgress(this.sessionProgress ?? this.read("vampRunnerProgress", {}));
   },
   settings() {
     const saved = this.read("vampRunnerSettings", {});
@@ -119,6 +99,7 @@ function button(scene, x, y, width, text, callback, primary = false) {
   const bg = scene.add
     .rectangle(x, y, width, 48, primary ? C.red : C.panel)
     .setStrokeStyle(1, primary ? C.red : C.line)
+    .setScrollFactor(0)
     .setInteractive({ useHandCursor: true });
   const caption = label(
     scene,
@@ -128,7 +109,7 @@ function button(scene, x, y, width, text, callback, primary = false) {
     13,
     primary ? "#ffffff" : "#eee5d3",
     true,
-  ).setOrigin(0.5);
+  ).setOrigin(0.5).setScrollFactor(0);
   bg.on("pointerover", () => bg.setFillStyle(primary ? 0xe15d75 : 0x263344));
   bg.on("pointerout", () => bg.setFillStyle(primary ? C.red : C.panel));
   bg.on("pointerdown", (pointer, lx, ly, event) => {
@@ -136,6 +117,10 @@ function button(scene, x, y, width, text, callback, primary = false) {
     callback();
   });
   return { bg, caption };
+}
+function onKey(scene, event, callback) {
+  scene.input.keyboard.on(event, callback);
+  scene.events.once("shutdown", () => scene.input.keyboard.off(event, callback));
 }
 function vignette(scene) {
   const g = scene.add.graphics();
@@ -235,6 +220,31 @@ class BootScene extends Phaser.Scene {
       g.fillRect(18, 15, 4, 9);
       g.fillStyle(0xe5dccc);
       g.fillRect(19, 28, 2, 6);
+    });
+    texture("dirt", () => {
+      g.fillStyle(C.gold, 0.13); g.fillCircle(20, 20, 18);
+      g.fillStyle(0x91755c); g.fillTriangle(4, 29, 19, 14, 36, 29);
+      g.fillStyle(0xd6b782); g.fillTriangle(10, 27, 19, 17, 27, 27);
+      g.fillStyle(0x6b605c); g.fillRoundedRect(16, 7, 9, 12, 4);
+      g.fillStyle(C.cream); g.fillRect(30, 9, 2, 6); g.fillRect(28, 11, 6, 2);
+    });
+    texture("iv", () => {
+      g.fillStyle(C.red, 0.16); g.fillCircle(20, 20, 19);
+      g.lineStyle(2, 0xc8d9df); g.strokeRoundedRect(10, 5, 20, 25, 4);
+      g.fillStyle(C.red); g.fillRoundedRect(13, 14, 14, 13, 2);
+      g.lineStyle(2, 0xc8d9df); g.lineBetween(20, 30, 20, 36); g.lineBetween(20, 36, 28, 36);
+      g.fillStyle(C.cream); g.fillRect(18, 2, 4, 4); g.fillRect(18, 17, 4, 8); g.fillRect(16, 19, 8, 4);
+    });
+    texture("garlic", () => {
+      g.fillStyle(0xe7dbc1); g.fillEllipse(20, 25, 25, 23);
+      g.fillStyle(0xc5b99e); g.fillEllipse(12, 26, 8, 16); g.fillEllipse(28, 26, 8, 16);
+      g.fillStyle(0xf6ecd4); g.fillEllipse(20, 25, 8, 20);
+      g.fillStyle(0x91a578); g.fillTriangle(16, 16, 19, 3, 23, 16);
+    });
+    texture("cross", () => {
+      g.fillStyle(C.gold, 0.12); g.fillCircle(20, 20, 19);
+      g.fillStyle(0xb28d5f); g.fillRect(14, 2, 12, 36); g.fillRect(4, 11, 32, 11);
+      g.fillStyle(0xf6d899); g.fillRect(17, 4, 6, 32); g.fillRect(6, 14, 28, 5);
     });
     texture("shelter", () => {
       g.fillStyle(C.mint, 0.12);
@@ -350,14 +360,14 @@ class MenuScene extends Phaser.Scene {
       this,
       24,
       435,
-      "Green crypt: home. Cross: lose a coffin.\nThree garlic hits: lose a coffin. Blood: heal.",
+      "Jump through the city. Stun, then bite.\nThree garlic hits or one cross: lose a coffin.",
       14,
       "#afbec9",
     ).setLineSpacing(6);
     const rows = [
-      ["01", "MOVE", "Arrow keys, WASD / ZQSD, or drag."],
-      ["02", "SHADOW DASH", "Space / Shift. Slip past danger."],
-      ["03", "GLAMOUR", "E or tap a nearby blue civilian."],
+      ["01", "RUN & JUMP", "← → / A D / Q D. Space to jump."],
+      ["02", "STUN → BITE", "E to stun. Get close. F to turn them."],
+      ["03", "BLOOD & GRAVE DIRT", "IV gives power. Dirt buys upgrades."],
     ];
     rows.forEach(([num, title, copy], i) => {
       const y = 500 + i * 54;
@@ -393,8 +403,9 @@ class MenuScene extends Phaser.Scene {
       this.toggleMotion(),
     );
     this.refreshSettings();
-    this.input.keyboard.on("keydown-ENTER", () => this.startRun());
-    this.input.keyboard.on("keydown-SPACE", () => this.startRun());
+    this.starting = false;
+    onKey(this, "keydown-ENTER", () => this.startRun());
+    onKey(this, "keydown-SPACE", () => this.startRun());
     announce(
       "Vamp Runner. Reach the crypt before sunrise. Press Enter to start.",
     );
@@ -419,1071 +430,338 @@ class MenuScene extends Phaser.Scene {
     this.refreshSettings();
   }
   startRun() {
+    if (this.starting) return;
+    this.starting = true;
     Sfx.play("glamour");
-    this.scene.start("Game");
+    this.scene.start("Game", { profile: Save.progress() });
   }
 }
 
 class GameScene extends Phaser.Scene {
-  constructor() {
-    super("Game");
-  }
-  init(data = {}) {
-    this.nightNumber = data.nightNumber || 1;
-    this.accumulatedScore = data.accumulatedScore || 0;
-    this.lives = data.lives ?? MAX_LIVES;
-  }
+  constructor() { super("Game"); }
+  init(data = {}) { this.runData = data; }
   create() {
-    const settings = nightSettings(this.nightNumber);
-    this.time.paused = false;
-    this.physics.resume();
-    this.tweens.resumeAll();
-    this.effectiveDuration = settings.duration;
-    this.npcSpeedMult = settings.speed;
-    this.variant = settings.variant;
-    this.timeLeft = this.effectiveDuration;
-    this.garlicHits = 0;
-    this.gameOver = false;
+    // Phaser reuses scene instances. Reset every piece of transient state.
+    this.world = createWorld({ ...this.runData, profile: this.runData.profile ?? Save.progress() });
     this.paused = false;
-    this.invulnerableFor = 0;
-    this.dashFor = 0;
-    this.dashCooldown = 0;
-    this.facing = { x: 0, y: -1 };
-    this.syringesCollected = 0;
-    this.glamouredEver = 0;
-    this.livesLost = 0;
-    this.trailTimer = 0;
-    this.warningShown = false;
-    this.levelData = buildLevelData(this.variant);
-    this.cameras.main.setBackgroundColor("#0b1018");
-    this.buildWorld();
-    this.spawnPlayer();
-    this.spawnNPCs();
-    this.sunlightGraphic = this.add.graphics().setDepth(5);
-    this.targetGraphic = this.add.graphics().setDepth(4);
-    // Extra space keeps the crypt above the player, clear of the HUD and controls.
-    this.cameras.main.setBounds(0, -150, MAP_W, MAP_H + 300);
-    this.cameras.main.startFollow(this.player, true, 0.13, 0.13);
-    this.buildUI();
+    this.transitioning = false;
+    this.pending = {};
+    this.held = new Map();
+    this.accumulator = 0;
+    this.messageUntil = 0;
+    this.pauseObjects = [];
+    this.time.paused = false;
+    this.tweens.resumeAll();
+    this.cameras.main.setBounds(0, 0, this.world.level.width, GAME_H);
+    this.cameras.main.setScroll(0, 0);
+    this.drawCity();
+    this.drawLevel();
+    this.player = this.add.image(80, FLOOR, "player").setOrigin(0.5, 1).setDisplaySize(44, 47).setDepth(10);
+    this.targetGraphic = this.add.graphics().setDepth(11);
+    this.buildHUD();
     this.buildControls();
-    this.physics.add.collider(this.player, this.walls);
-    this.physics.add.overlap(this.player, this.npcGroup, (_player, sprite) =>
-      this.touchNPC(sprite.npc),
-    );
-    this.physics.add.overlap(
-      this.player,
-      this.syringes,
-      this.collectSyringe,
-      null,
-      this,
-    );
-    this.physics.add.overlap(this.player, this.shelterGroup, () =>
-      this.triggerNightComplete(),
-    );
-    this.updateUI();
-    this.updateSunlight();
-    this.showBanner(
-      "NIGHT " +
-        String(this.nightNumber).padStart(2, "0") +
-        " · " +
-        DISTRICTS[this.variant],
-      "Head north. The crypt is waiting.",
-    );
     this.onBlur = () => this.pauseGame();
-    this.onVisibility = () => {
-      if (document.hidden) this.pauseGame();
-    };
+    this.onVisibility = () => { if (document.hidden) this.pauseGame(); };
     window.addEventListener("blur", this.onBlur);
     document.addEventListener("visibilitychange", this.onVisibility);
     this.events.once("shutdown", () => {
       window.removeEventListener("blur", this.onBlur);
       document.removeEventListener("visibilitychange", this.onVisibility);
-      this.time.paused = false;
+      this.resetInput();
     });
-    announce(
-      "Night " + this.nightNumber + ". Reach the northern crypt before dawn.",
-    );
+    this.renderWorld();
+    announce(`Night ${this.world.night}. Jump through the city to the crypt before sunrise. Stun humans, then bite.`);
   }
-  buildWorld() {
-    this.walls = this.physics.add.staticGroup();
-    this.syringes = this.physics.add.staticGroup();
-    this.shelterGroup = this.physics.add.staticGroup();
-    for (let r = 0; r < MAP_ROWS; r++)
-      for (let c = 0; c < MAP_COLS; c++) {
-        const x = c * TILE + 20,
-          y = r * TILE + 20,
-          cell = this.levelData[r][c];
-        this.add
-          .image(x, y, "floor")
-          .setDepth(0)
-          .setAlpha(0.88 + ((r * 7 + c * 13) % 4) * 0.03);
-        if (cell === 1)
-          this.walls.create(x, y, "wall").setDepth(1).refreshBody();
-        if (cell === 4) {
-          const pickup = this.syringes
-            .create(x, y, "syringe")
-            .setDepth(1)
-            .refreshBody()
-            .setCircle(12, 8, 8);
-          if (!preferences.reducedMotion)
-            this.tweens.add({
-              targets: pickup,
-              alpha: 0.55,
-              duration: 1100,
-              yoyo: true,
-              repeat: -1,
-              delay: (r % 3) * 200,
-            });
-        }
-        if (cell === 5) {
-          this.shelter = this.shelterGroup
-            .create(x, y, "shelter")
-            .setDepth(2)
-            .refreshBody();
-          label(this, x, y - 37, "THE CRYPT", 11, "#90d9bf", true)
-            .setOrigin(0.5)
-            .setDepth(3);
-          const halo = this.add.circle(x, y, 33, C.mint, 0.08).setDepth(1);
-          if (!preferences.reducedMotion)
-            this.tweens.add({
-              targets: halo,
-              scale: 1.25,
-              alpha: 0.02,
-              duration: 1700,
-              repeat: -1,
-              yoyo: true,
-            });
-        }
-      }
-    const lamps = this.add.graphics().setDepth(1);
-    for (let r = 3; r < MAP_ROWS - 2; r += 6)
-      for (const c of [2, 17]) {
-        if (this.levelData[r][c] === 1) continue;
-        const x = c * TILE + 20,
-          y = r * TILE + 20;
-        for (let i = 3; i > 0; i--) {
-          lamps.fillStyle(C.gold, 0.02);
-          lamps.fillCircle(x, y, 18 * i);
-        }
-        lamps.fillStyle(C.gold, 0.75);
-        lamps.fillCircle(x, y, 2);
-      }
-  }
-  spawnPlayer() {
-    this.player = this.physics.add
-      .image(10 * TILE + 20, (MAP_ROWS - 3) * TILE + 20, "player")
-      .setDepth(3)
-      .setCircle(10, 6, 10)
-      .setCollideWorldBounds(true);
-    this.physics.world.setBounds(0, 0, MAP_W, MAP_H);
-  }
-  spawnNPCs() {
-    this.npcs = [];
-    this.npcGroup = this.physics.add.group();
-    const occupied = new Set();
-    getNPCSpawns(this.variant).forEach(({ r, c, type }) => {
-      let cell = nearestOpenCell(this.levelData, r, c);
-      // Keep the centre of the spawn tile clear, even in the tighter district.
-      if (occupied.has(cell.r + "," + cell.c)) {
-        const copy = this.levelData.map((row) => row.slice());
-        occupied.forEach((key) => {
-          const [rr, cc] = key.split(",").map(Number);
-          copy[rr][cc] = 1;
-        });
-        cell = nearestOpenCell(copy, r, c);
-      }
-      occupied.add(cell.r + "," + cell.c);
-      const sprite = this.physics.add
-        .image(cell.c * TILE + 20, cell.r * TILE + 20, "npc_" + type)
-        .setDepth(2)
-        .setCircle(10, 6, 10)
-        .setCollideWorldBounds(true);
-      this.npcGroup.add(sprite);
-      this.physics.add.collider(sprite, this.walls);
-      const npc = {
-        sprite,
-        type,
-        glamoured: false,
-        stunTimer: 0,
-        dirTimer: 0,
-        path: [],
-        chasing: false,
-      };
-      sprite.npc = npc;
-      this.npcs.push(npc);
-    });
-  }
-  nearestSyringe(x, y) {
-    let best = null,
-      dist = Infinity;
-    this.syringes.getChildren().forEach((s) => {
-      const d = Phaser.Math.Distance.Between(x, y, s.x, s.y);
-      if (s.active && d < dist) {
-        best = s;
-        dist = d;
-      }
-    });
-    return best;
-  }
-  routeNPC(npc) {
-    const from = {
-      r: Math.floor(npc.sprite.y / TILE),
-      c: Math.floor(npc.sprite.x / TILE),
-    };
-    const distance = Phaser.Math.Distance.Between(
-      npc.sprite.x,
-      npc.sprite.y,
-      this.player.x,
-      this.player.y,
-    );
-    npc.chasing = npc.type === "priest" && !npc.glamoured && distance < 240;
-    let destination;
-    if (npc.glamoured)
-      destination =
-        this.nearestSyringe(npc.sprite.x, npc.sprite.y) || this.player;
-    else if (npc.chasing) destination = this.player;
-    else {
-      const target = nearestOpenCell(
-        this.levelData,
-        from.r + Phaser.Math.Between(-3, 3),
-        from.c + Phaser.Math.Between(-3, 3),
-      );
-      destination = { x: target.c * TILE + 20, y: target.r * TILE + 20 };
+  fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
+  drawCity() {
+    const sky = this.fixed(this.add.graphics(), -10);
+    sky.fillGradientStyle(0x101322, 0x101322, 0x493441, 0x493441, 1);
+    sky.fillRect(0, 0, GAME_W, GAME_H);
+    for (let i = 0; i < 40; i++) {
+      sky.fillStyle(C.cream, 0.25 + (i % 4) * 0.1);
+      sky.fillRect((i * 83 + 17) % GAME_W, 170 + (i * 39) % 270, 1, 1);
     }
-    const to = {
-      r: Math.floor(destination.y / TILE),
-      c: Math.floor(destination.x / TILE),
-    };
-    npc.path = findPath(this.levelData, from, to).map((p) => ({
-      x: p.c * TILE + 20,
-      y: p.r * TILE + 20,
-    }));
-    if (
-      npc.path.length &&
-      Phaser.Math.Distance.Between(
-        npc.sprite.x,
-        npc.sprite.y,
-        npc.path[0].x,
-        npc.path[0].y,
-      ) < 8
-    )
-      npc.path.shift();
-    npc.dirTimer = npc.glamoured ? 900 : npc.chasing ? 1100 : 2200;
-  }
-  updateNPCs(delta) {
-    for (const npc of this.npcs) {
-      if (!npc.sprite.active) continue;
-      if (npc.stunTimer > 0) {
-        npc.stunTimer = Math.max(0, npc.stunTimer - delta);
-        npc.sprite.setVelocity(0, 0);
-        if (npc.stunTimer === 0) npc.sprite.clearTint();
-        continue;
-      }
-      npc.dirTimer -= delta;
-      // Finish the current waypoint before replanning to avoid backtracking mid-tile.
-      if (
-        npc.dirTimer <= 0 &&
-        (npc.path.length === 0 ||
-          Phaser.Math.Distance.Between(
-            npc.sprite.x,
-            npc.sprite.y,
-            npc.path[0].x,
-            npc.path[0].y,
-          ) < 7)
-      )
-        this.routeNPC(npc);
-      let next = npc.path[0];
-      if (
-        next &&
-        Phaser.Math.Distance.Between(
-          npc.sprite.x,
-          npc.sprite.y,
-          next.x,
-          next.y,
-        ) < 5
-      ) {
-        npc.path.shift();
-        next = npc.path[0];
-      }
-      if (next) {
-        const dx = next.x - npc.sprite.x,
-          dy = next.y - npc.sprite.y,
-          len = Math.hypot(dx, dy) || 1;
-        const speed =
-          (npc.glamoured
-            ? NPC_SPEED * 1.5
-            : npc.type === "priest"
-              ? PRIEST_SPEED
-              : NPC_SPEED) * this.npcSpeedMult;
-        npc.sprite.setVelocity((dx / len) * speed, (dy / len) * speed);
-        if (Math.abs(dx) > 3) npc.sprite.setFlipX(dx < 0);
-      } else npc.sprite.setVelocity(0, 0);
-      if (!npc.glamoured) continue;
-      const nearby = this.nearestSyringe(npc.sprite.x, npc.sprite.y);
-      if (
-        nearby &&
-        Phaser.Math.Distance.Between(
-          npc.sprite.x,
-          npc.sprite.y,
-          nearby.x,
-          nearby.y,
-        ) < 25
-      )
-        this.collectSyringe(npc.sprite, nearby);
-      this.npcs.forEach((other) => {
-        if (
-          other.type === "priest" &&
-          !other.glamoured &&
-          other.stunTimer === 0 &&
-          Phaser.Math.Distance.Between(
-            npc.sprite.x,
-            npc.sprite.y,
-            other.sprite.x,
-            other.sprite.y,
-          ) < 48 &&
-          clearSight(this.levelData, npc.sprite, other.sprite)
-        ) {
-          other.stunTimer = 2500;
-          other.sprite.setTint(C.mint);
-          other.sprite.setVelocity(0, 0);
-          this.floatText(
-            other.sprite.x,
-            other.sprite.y - 15,
-            "STUNNED",
-            "#90d9bf",
-          );
+    sky.fillStyle(0xd9d4bf); sky.fillCircle(284, 250, 33);
+    sky.fillStyle(0x1b1b2b); sky.fillCircle(296, 240, 30);
+    this.dawn = this.fixed(this.add.rectangle(195, 422, 390, 844, 0xf5a568, 0), -8);
+    for (let layer = 0; layer < 2; layer++) {
+      const g = this.add.graphics().setScrollFactor(layer ? 0.45 : 0.2).setDepth(-6 + layer);
+      for (let i = 0; i < 35; i++) {
+        const x = i * 86, h = 80 + ((i * 37 + layer * 47) % 170), y = FLOOR - h;
+        g.fillStyle(layer ? 0x1b2630 : 0x252b3b);
+        g.fillRect(x, y, 80, h + 10);
+        g.fillTriangle(x - 5, y, x + 40, y - 28, x + 85, y);
+        g.fillStyle(C.gold, layer ? 0.25 : 0.1);
+        for (let row = 0; row < Math.floor(h / 35); row++) {
+          g.fillRect(x + 19, y + 18 + row * 35, 8, 13);
+          g.fillRect(x + 53, y + 18 + row * 35, 8, 13);
         }
-      });
+      }
     }
   }
-  eligibleTarget(npc) {
-    return (
-      npc.type === "plain" &&
-      !npc.glamoured &&
-      npc.sprite.active &&
-      Phaser.Math.Distance.Between(
-        this.player.x,
-        this.player.y,
-        npc.sprite.x,
-        npc.sprite.y,
-      ) <= GLAMOUR_DISTANCE &&
-      clearSight(this.levelData, this.player, npc.sprite)
-    );
-  }
-  nearestGlamourTarget() {
-    return (
-      this.npcs
-        .filter((n) => this.eligibleTarget(n))
-        .sort(
-          (a, b) =>
-            Phaser.Math.Distance.Between(
-              this.player.x,
-              this.player.y,
-              a.sprite.x,
-              a.sprite.y,
-            ) -
-            Phaser.Math.Distance.Between(
-              this.player.x,
-              this.player.y,
-              b.sprite.x,
-              b.sprite.y,
-            ),
-        )[0] || null
-    );
-  }
-  glamourNPC(npc = this.nearestGlamourTarget()) {
-    if (this.gameOver || this.paused) return;
-    if (!npc || !this.eligibleTarget(npc)) {
-      this.controlMessage("Get closer to a blue civilian.");
-      return;
+  drawLevel() {
+    const level = this.world.level, g = this.add.graphics().setDepth(1);
+    for (const p of level.platforms) {
+      g.fillStyle(p.ground ? 0x263340 : 0x18232e);
+      g.fillRect(p.x, p.y, p.w, p.ground ? 120 : FLOOR - p.y);
+      g.fillStyle(p.ground ? 0x78918f : 0x9b8691);
+      g.fillRect(p.x, p.y, p.w, 4);
+      g.lineStyle(1, 0x43525b, 0.45);
+      for (let x = p.x + 12; x < p.x + p.w - 10; x += 32) {
+        if (p.ground) g.lineBetween(x, p.y + 8, x + 8, p.y + 8);
+        else {
+          g.fillStyle(C.gold, 0.18);
+          g.fillRoundedRect(x, p.y + 24, 13, 24, 6);
+        }
+      }
     }
-    npc.glamoured = true;
-    npc.sprite.setTexture("npc_glamoured");
-    npc.dirTimer = 0;
-    npc.path = [];
-    this.glamouredEver++;
-    this.updateUI();
-    Sfx.play("glamour");
-    this.burst(npc.sprite.x, npc.sprite.y, C.mint);
-    this.floatText(
-      npc.sprite.x,
-      npc.sprite.y - 12,
-      "AN ALLY, AT LAST",
-      "#90d9bf",
-    );
+    for (const gap of level.gaps) {
+      g.fillStyle(C.red, 0.4); g.fillRect(gap.x - 8, FLOOR, 8, 5); g.fillRect(gap.x + gap.width, FLOOR, 8, 5);
+      label(this, gap.x + gap.width / 2, FLOOR + 37, "↓", 17, "#c9758a").setOrigin(0.5);
+    }
+    const crypt = level.crypt;
+    g.fillStyle(0x35464b); g.fillRect(crypt.x - 60, FLOOR - 108, 120, 108);
+    g.fillStyle(0x61746d); g.fillTriangle(crypt.x - 72, FLOOR - 108, crypt.x, FLOOR - 153, crypt.x + 72, FLOOR - 108);
+    g.fillStyle(0x091c19); g.fillRoundedRect(crypt.x - 34, FLOOR - 92, 68, 92, 30);
+    this.add.image(crypt.x, FLOOR - 40, "shelter").setDisplaySize(55, 72).setDepth(2);
+    label(this, crypt.x, FLOOR - 174, "YOUR CRYPT", 13, "#90d9bf", true).setOrigin(0.5);
+    this.pickups = level.pickups.map((p) => this.add.image(p.x, p.y, p.kind).setDepth(5).setDisplaySize(p.kind === "dirt" ? 27 : 34, p.kind === "dirt" ? 27 : 34));
+    level.hazards.forEach((h) => this.add.image(h.x, h.y, h.kind).setDepth(6).setDisplaySize(36, 40));
+    this.humans = level.humans.map((h) => this.add.image(h.x, h.y + h.h, "npc_plain").setOrigin(0.5, 1).setDisplaySize(38, 42).setDepth(7));
+    label(this, 420, 393, "ROOFTOP ALLEY", 12, "#dbb77e", true).setOrigin(0.5);
+    label(this, 420, 413, "More dirt. Less time.", 13, "#bec5cd").setOrigin(0.5);
   }
-  buildUI() {
-    const hud = this.add.graphics().setScrollFactor(0).setDepth(10);
-    hud.fillStyle(C.ink, 0.96);
-    hud.fillRoundedRect(12, 12, 366, 134, 12);
-    hud.lineStyle(1, C.line, 0.7);
-    hud.strokeRoundedRect(12, 12, 366, 134, 12);
-    label(
-      this,
-      24,
-      25,
-      "NIGHT " +
-        String(this.nightNumber).padStart(2, "0") +
-        " / " +
-        DISTRICTS[this.variant],
-      10,
-      "#a5b5c4",
-      true,
-    )
-      .setScrollFactor(0)
-      .setDepth(11);
-    this.timerText = label(this, 24, 48, "", 32)
-      .setScrollFactor(0)
-      .setDepth(11);
-    label(this, 130, 64, "UNTIL DAWN", 10, "#b5a488", true)
-      .setScrollFactor(0)
-      .setDepth(11);
-    this.add
-      .rectangle(24, 92, 342, 4, 0x344351)
-      .setOrigin(0)
-      .setScrollFactor(0)
-      .setDepth(11);
-    this.timerBar = this.add
-      .rectangle(24, 92, 342, 4, C.gold)
-      .setOrigin(0)
-      .setScrollFactor(0)
-      .setDepth(12);
-    this.livesText = label(this, 24, 110, "", 12, "#ecb0bc", true)
-      .setScrollFactor(0)
-      .setDepth(11);
-    this.garlicText = label(this, 168, 111, "", 11, "#d6c78b", true)
-      .setScrollFactor(0)
-      .setDepth(11);
-    this.scoreText = label(this, 366, 112, "", 11, "#eee5d3", true)
-      .setOrigin(1, 0)
-      .setScrollFactor(0)
-      .setDepth(11);
-    const pause = this.add
-      .rectangle(350, 59, 42, 42, C.panel)
-      .setStrokeStyle(1, C.line)
-      .setInteractive({ useHandCursor: true })
-      .setScrollFactor(0)
-      .setDepth(12);
-    label(this, 350, 59, "Ⅱ", 20)
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(12);
-    pause.on("pointerdown", (_p, _x, _y, e) => {
-      e?.stopPropagation();
-      this.pauseGame();
-    });
-    this.cryptText = label(this, 195, 159, "", 11, "#90d9bf", true)
-      .setOrigin(0.5, 0)
-      .setScrollFactor(0)
-      .setDepth(11);
-    this.minimap = this.add.graphics().setScrollFactor(0).setDepth(11);
-    this.footer = this.add
-      .rectangle(195, 786, 390, 116, C.ink, 0.88)
-      .setScrollFactor(0)
-      .setDepth(10);
-    label(this, 25, 717, "MOVE", 10, "#90a5b6", true)
-      .setScrollFactor(0)
-      .setDepth(11);
-    label(this, 169, 815, "P / ESC · PAUSE", 9, "#8e9cac", true)
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(11);
-    this.glamourStatus = label(this, 195, 687, "", 11, "#90d9bf", true)
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(11);
-  }
-  updateUI() {
-    const ratio = timeRatio(this.timeLeft, this.effectiveDuration),
-      seconds = Math.ceil(this.timeLeft);
-    this.timerText.setText(
-      Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0"),
-    );
-    this.timerText.setColor(seconds <= 15 ? "#f38a94" : "#eee5d3");
-    this.timerBar.width = 342 * ratio;
-    this.timerBar.setFillStyle(seconds <= 15 ? C.red : C.gold);
-    this.livesText.setText("COFFINS " + this.lives + "/3");
-    this.garlicText.setText("GARLIC " + this.garlicHits + "/3");
-    this.scoreText.setText(
-      (
-        this.accumulatedScore + this.calculateNightScore(false)
-      ).toLocaleString(),
-    );
+  buildHUD() {
+    this.fixed(this.add.rectangle(195, 72, 390, 144, C.ink, 0.97));
+    this.fixed(label(this, 20, 19, `NIGHT ${String(this.world.night).padStart(2, "0")}`, 13, "#dfb778", true));
+    this.clock = this.fixed(label(this, 370, 18, "", 18, "#eee5d3", true).setOrigin(1, 0));
+    this.fixed(this.add.rectangle(20, 54, 350, 4, C.line).setOrigin(0, 0.5));
+    this.sunBar = this.fixed(this.add.rectangle(20, 54, 350, 4, C.gold).setOrigin(0, 0.5));
+    this.fixed(label(this, 20, 68, "COFFINS", 10, "#a9bac8", true));
+    this.coffins = [0, 1, 2].map((i) => this.fixed(this.add.image(30 + i * 29, 101, "shelter").setDisplaySize(23, 28)));
+    this.fixed(label(this, 129, 68, "GARLIC HITS", 10, "#a9bac8", true));
+    this.garlic = [0, 1, 2].map((i) => this.fixed(this.add.circle(141 + i * 23, 100, 6, C.line)));
+    this.wallet = this.fixed(label(this, 370, 69, "", 13, "#dfb778", true).setOrigin(1, 0));
+    this.scoreText = this.fixed(label(this, 370, 96, "", 13, "#eee5d3", true).setOrigin(1, 0));
+    this.routeText = this.fixed(label(this, 20, 126, "", 11, "#a9bac8", true));
+    this.message = this.fixed(label(this, 195, 219, "", 15, "#eee5d3").setOrigin(0.5).setWordWrapWidth(350).setAlign("center"));
+    const pause = this.fixed(this.add.rectangle(351, 174, 48, 48, C.ink, 0.9).setStrokeStyle(1, C.line).setInteractive());
+    this.fixed(label(this, 351, 174, "Ⅱ", 21).setOrigin(0.5));
+    pause.on("pointerdown", (_p, _x, _y, event) => { event?.stopPropagation(); this.pauseGame(); });
+    this.fixed(this.add.rectangle(195, 758, 390, 172, C.ink, 0.98));
+    this.hint = this.fixed(label(this, 195, 687, "", 12, "#c4b28d", true).setOrigin(0.5));
   }
   buildControls() {
-    this.joystick = {
-      active: false,
-      pointerId: null,
-      baseX: 85,
-      baseY: 783,
-      dx: 0,
-      dy: 0,
-    };
-    this.joyBase = this.add
-      .circle(85, 783, 44, 0x334a59, 0.28)
-      .setStrokeStyle(1, 0x5f7988, 0.7)
-      .setScrollFactor(0)
-      .setDepth(12);
-    this.joyStick = this.add
-      .circle(85, 783, 18, 0x829aaa, 0.4)
-      .setScrollFactor(0)
-      .setDepth(13);
-    this.dashButton = this.add
-      .circle(322, 737, 31, 0x502e43, 0.9)
-      .setStrokeStyle(1, C.red)
-      .setScrollFactor(0)
-      .setDepth(12)
-      .setInteractive({ useHandCursor: true });
-    this.dashLabel = label(this, 322, 737, "DASH", 11, "#f5bac5", true)
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(13);
-    label(this, 322, 777, "SPACE", 8, "#b0a1b0", true)
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(13);
-    this.glamourButton = this.add
-      .circle(245, 781, 29, 0x26453f, 0.9)
-      .setStrokeStyle(1, C.mint)
-      .setScrollFactor(0)
-      .setDepth(12)
-      .setInteractive({ useHandCursor: true });
-    label(this, 245, 779, "CHARM", 9, "#bbe7d6", true)
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(13);
-    label(this, 245, 821, "E", 8, "#b1c9c0", true)
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(13);
-    this.dashButton.on("pointerdown", (_p, _x, _y, e) => {
-      e?.stopPropagation();
-      this.startDash();
+    this.keys = this.input.keyboard.addKeys("LEFT,RIGHT,A,D,Q");
+    onKey(this, "keydown", (e) => {
+      if (e.repeat) return;
+      if (["Escape", "KeyP"].includes(e.code)) { this.paused ? this.resumeGame() : this.pauseGame(); return; }
+      if (this.paused || this.transitioning) return;
+      if (["Space", "ArrowUp", "KeyW", "KeyZ"].includes(e.code)) { e.preventDefault?.(); this.pending.jump = true; }
+      if (["KeyE", "KeyJ"].includes(e.code)) this.pending.stun = true;
+      if (["KeyF", "KeyK"].includes(e.code)) this.pending.bite = true;
     });
-    this.glamourButton.on("pointerdown", (_p, _x, _y, e) => {
-      e?.stopPropagation();
-      this.glamourNPC();
-    });
-    this.keys = this.input.keyboard.addKeys("W,A,S,D,Z,Q,UP,DOWN,LEFT,RIGHT");
-    this.input.keyboard.on("keydown", (event) => {
-      if (event.repeat) return;
-      if (["Escape", "KeyP"].includes(event.code)) {
-        this.paused ? this.resumeGame() : this.pauseGame();
-        return;
-      }
-      if (this.paused || this.gameOver) return;
-      if (["Space", "ShiftLeft", "ShiftRight"].includes(event.code)) {
-        event.preventDefault();
-        this.startDash();
-      }
-      if (event.code === "KeyE") this.glamourNPC();
-    });
-    this.input.on("pointerdown", (p) => {
-      if (this.gameOver || this.paused || p.y < 185) return;
-      // Action buttons own the right-hand control area; movement cannot swallow them.
-      if (p.x > 180 && p.y > 690) return;
-      const world = this.cameras.main.getWorldPoint(p.x, p.y);
-      const target = this.npcs.find(
-        (n) =>
-          this.eligibleTarget(n) &&
-          Phaser.Math.Distance.Between(
-            world.x,
-            world.y,
-            n.sprite.x,
-            n.sprite.y,
-          ) < 25,
-      );
-      if (target && p.y < 690) {
-        this.glamourNPC(target);
-        return;
-      }
-      if (this.joystick.active) return;
-      Object.assign(this.joystick, {
-        active: true,
-        pointerId: p.id,
-        baseX: p.x,
-        baseY: p.y,
+    this.input.keyboard.addCapture?.(["SPACE", "UP", "LEFT", "RIGHT"]);
+    this.moveButtons = [];
+    for (const [x, direction, title] of [[49, -1, "←"], [124, 1, "→"]]) {
+      const bg = this.fixed(this.add.rectangle(x, 774, 66, 90, C.panel).setStrokeStyle(1, C.line).setInteractive());
+      this.fixed(label(this, x, 770, title, 31).setOrigin(0.5));
+      this.moveButtons.push({ bg, direction });
+      bg.on("pointerdown", (pointer, _x, _y, event) => {
+        event?.stopPropagation();
+        if (!this.paused && !this.transitioning) this.held.set(pointer.id, direction);
       });
-      this.joyBase.setPosition(p.x, p.y);
-      this.joyStick.setPosition(p.x, p.y);
-    });
-    this.input.on("pointermove", (p) => {
-      if (!this.joystick.active || this.joystick.pointerId !== p.id) return;
-      const dx = p.x - this.joystick.baseX,
-        dy = p.y - this.joystick.baseY,
-        dist = Math.hypot(dx, dy);
-      const strength = Math.min(1, Math.max(0, (dist - 7) / 36)),
-        len = dist || 1;
-      this.joystick.dx = (dx / len) * strength;
-      this.joystick.dy = (dy / len) * strength;
-      this.joyStick.setPosition(
-        this.joystick.baseX + (dx / len) * Math.min(40, dist),
-        this.joystick.baseY + (dy / len) * Math.min(40, dist),
-      );
-    });
-    const release = (p) => {
-      if (p.id === this.joystick.pointerId) this.resetMovement();
-    };
+      bg.on("pointerout", (pointer) => this.held.delete(pointer.id));
+    }
+    const release = (pointer) => this.held.delete(pointer.id);
     this.input.on("pointerup", release);
     this.input.on("pointerupoutside", release);
-    this.input.on("gameout", () => this.resetMovement());
+    this.input.on("gameout", () => this.held.clear());
+    this.stunButton = button(this, 223, 737, 92, "STUN · E", () => { if (!this.paused) this.pending.stun = true; });
+    this.biteButton = button(this, 329, 737, 92, "BITE · F", () => { if (!this.paused) this.pending.bite = true; });
+    this.jumpButton = button(this, 276, 798, 198, "JUMP ↑", () => { if (!this.paused) this.pending.jump = true; }, true);
+    for (const item of [this.stunButton, this.biteButton, this.jumpButton]) { this.fixed(item.bg); this.fixed(item.caption); }
+    this.events.once("shutdown", () => this.input.removeAllListeners());
   }
-  resetMovement() {
-    if (!this.joystick) return;
-    Object.assign(this.joystick, {
-      active: false,
-      pointerId: null,
-      dx: 0,
-      dy: 0,
-    });
-    this.joyBase.setPosition(85, 783);
-    this.joyStick.setPosition(85, 783);
-  }
-  movement() {
-    const k = this.keys;
-    const x =
-      Number(k.RIGHT.isDown || k.D.isDown) -
-      Number(k.LEFT.isDown || k.A.isDown || k.Q.isDown);
-    const y =
-      Number(k.DOWN.isDown || k.S.isDown) -
-      Number(k.UP.isDown || k.W.isDown || k.Z.isDown);
-    return x || y
-      ? movementVector(x, y)
-      : movementVector(this.joystick.dx, this.joystick.dy);
-  }
-  startDash() {
-    if (this.paused || this.gameOver || this.dashCooldown > 0) return;
-    const movement = this.movement(),
-      length = Math.hypot(movement.x, movement.y);
-    this.dashDirection = length
-      ? { x: movement.x / length, y: movement.y / length }
-      : { ...this.facing };
-    this.dashFor = DASH_LENGTH;
-    this.dashCooldown = DASH_COOLDOWN;
-    Sfx.play("dash");
-    this.burst(this.player.x, this.player.y, C.red, 7);
-  }
-  touchNPC(npc) {
-    if (!npc || npc.glamoured || npc.stunTimer > 0 || this.isProtected())
-      return;
-    if (npc.type === "priest") this.loseLife("A hunter’s cross found you.");
-    if (npc.type === "garlic") {
-      this.garlicHits++;
-      this.invulnerableFor = 1.5;
-      if (this.garlicHits >= GARLIC_HITS_PER_LIFE) {
-        this.garlicHits = 0;
-        this.loseLife("Too much garlic. Too little time.");
-      } else {
-        this.feedbackHit();
-        this.floatText(
-          this.player.x,
-          this.player.y - 15,
-          "GARLIC " + this.garlicHits + "/3",
-          "#e4cc85",
-        );
-      }
-      this.updateUI();
-    }
-  }
-  isProtected() {
-    return (
-      this.gameOver ||
-      this.paused ||
-      this.invulnerableFor > 0 ||
-      this.dashFor > 0
-    );
-  }
-  collectSyringe(_collector, syringe) {
-    if (this.gameOver || this.paused || !syringe.active) return;
-    const { x, y } = syringe;
-    this.tweens.killTweensOf(syringe);
-    syringe.destroy();
-    this.syringesCollected++;
-    this.garlicHits = Math.max(0, this.garlicHits - 1);
-    this.dashCooldown = Math.max(0, this.dashCooldown - 1.2);
-    this.floatText(x, y - 10, "+300 · BLOOD", "#f5a0af");
-    this.burst(x, y, C.red, 6);
-    this.updateUI();
-    Sfx.play("blood");
-  }
-  loseLife(reason) {
-    if (this.gameOver || this.paused) return;
-    this.lives = Math.max(0, this.lives - 1);
-    this.livesLost++;
-    this.invulnerableFor = 2;
-    this.feedbackHit();
-    this.updateUI();
-    if (this.lives === 0) this.triggerLose(reason);
-    else
-      this.floatText(
-        this.player.x,
-        this.player.y - 15,
-        "ONE COFFIN LOST",
-        "#f6a5b2",
-      );
-  }
-  feedbackHit() {
-    if (!preferences.reducedMotion) this.cameras.main.shake(170, 0.005);
-    this.burst(this.player.x, this.player.y, C.red);
-    Sfx.play("hit");
-  }
-  updateSunlight() {
-    this.sunline = sunlightBoundary(this.timeLeft, this.effectiveDuration);
-    const g = this.sunlightGraphic;
-    g.clear();
-    if (this.sunline >= MAP_H) return;
-    g.fillStyle(0xdf8d44, 0.25);
-    g.fillRect(0, this.sunline, MAP_W, MAP_H - this.sunline);
-    for (let i = 0; i < 5; i++) {
-      g.fillStyle(C.gold, 0.04 + i * 0.02);
-      g.fillRect(0, this.sunline + i * 8, MAP_W, 8);
-    }
-    g.fillStyle(C.gold, 0.75);
-    g.fillRect(0, this.sunline, MAP_W, 2);
-  }
-  calculateNightScore(survived = false) {
-    return nightScore(
-      {
-        night: this.nightNumber,
-        timeLeft: this.timeLeft,
-        blood: this.syringesCollected,
-        allies: this.glamouredEver,
-        lost: this.livesLost,
-      },
-      survived,
-    );
-  }
-  stopRun() {
-    this.gameOver = true;
-    this.resetMovement();
-    this.player.setVelocity(0, 0);
-    this.player.setAlpha(1);
-    this.npcs.forEach((n) => n.sprite.setVelocity(0, 0));
-    this.physics.pause();
-    this.tweens.killTweensOf(this.player);
-  }
-  triggerNightComplete() {
-    if (this.gameOver || this.paused) return;
-    this.stopRun();
-    const points = this.calculateNightScore(true),
-      total = this.accumulatedScore + points;
-    this.accumulatedScore = total;
-    Sfx.play("safe");
-    const bonusLife = this.nightNumber % 3 === 0 && this.lives < MAX_LIVES;
-    if (bonusLife) this.lives++;
-    this.makeOverlay(
-      "THE CRYPT IS YOURS.",
-      "Night " + this.nightNumber + " survived.",
-      [
-        ["Time remaining", Math.ceil(this.timeLeft) + " seconds"],
-        ["Blood collected", String(this.syringesCollected)],
-        ["Allies charmed", String(this.glamouredEver)],
-        ["Night score", "+" + points.toLocaleString()],
-        ["Run total", total.toLocaleString()],
-      ],
-      bonusLife
-        ? "A third night survived. One coffin restored."
-        : "The city will be less forgiving tomorrow.",
-    );
-    this.overlayButton(570, "NEXT NIGHT  →", () => this.nextNight(), true);
-    this.overlayButton(
-      634,
-      "END RUN & SAVE",
-      () => this.finishRun(total, this.nightNumber, "You chose to sleep."),
-      false,
-    );
-    this.input.keyboard.once("keydown-ENTER", () => this.nextNight());
-    announce(
-      "Night survived. " + points + " points. Press Enter for the next night.",
-    );
-  }
-  nextNight() {
-    if (!this.gameOver) return;
-    this.scene.restart({
-      nightNumber: this.nightNumber + 1,
-      accumulatedScore: this.accumulatedScore,
-      lives: this.lives,
-    });
-  }
-  triggerLose(reason) {
-    if (this.gameOver) return;
-    this.stopRun();
-    Sfx.play("hit");
-    const score = this.accumulatedScore + this.calculateNightScore(false);
-    this.finishRun(score, this.nightNumber - 1, reason);
-  }
-  finishRun(score, nights, reason) {
-    this.scene.start("Score", { score, nights, reason });
-  }
-  makeOverlay(title, subtitle, rows = [], note = "") {
-    this.overlay = this.add.container(0, 0).setScrollFactor(0).setDepth(30);
-    const dim = this.add
-      .rectangle(195, 422, 390, 844, C.ink, 0.92)
-      .setInteractive();
-    dim.on("pointerdown", (_p, _x, _y, e) => e?.stopPropagation());
-    this.overlay.add(dim);
-    this.overlay.add(label(this, 195, 216, title, 25).setOrigin(0.5));
-    this.overlay.add(
-      label(this, 195, 261, subtitle, 15, "#acbdc9").setOrigin(0.5),
-    );
-    rows.forEach(([key, val], i) => {
-      this.overlay.add(label(this, 40, 315 + i * 33, key, 14, "#a3b5c4"));
-      this.overlay.add(
-        label(this, 350, 315 + i * 33, val, 14, "#eee5d3", true).setOrigin(
-          1,
-          0,
-        ),
-      );
-    });
-    if (note)
-      this.overlay.add(
-        label(this, 195, 510, note, 12, "#bca984").setOrigin(0.5),
-      );
-  }
-  overlayButton(y, title, callback, primary = false) {
-    const item = button(this, 195, y, 310, title, callback, primary);
-    this.overlay.add([item.bg, item.caption]);
-    return item;
-  }
+  resetInput() { this.held?.clear(); this.pending = {}; this.input.keyboard.resetKeys(); }
   pauseGame() {
-    if (this.paused || this.gameOver) return;
+    if (this.paused || this.transitioning || this.world.status !== "playing") return;
     this.paused = true;
-    this.resetMovement();
-    this.input.keyboard.resetKeys();
-    this.player.setVelocity(0, 0);
-    this.physics.pause();
-    this.tweens.pauseAll();
-    this.time.paused = true;
-    this.makeOverlay(
-      "EVEN THE UNDEAD REST.",
-      "The night can wait.",
-      [
-        ["Move", "Arrows / WASD / ZQSD"],
-        ["Dash", "Space or Shift"],
-        ["Charm nearby civilian", "E"],
-        ["Resume", "P or Escape"],
-      ],
-      "Blood heals garlic damage and recharges dash.",
-    );
-    this.overlayButton(570, "RESUME THE HUNT", () => this.resumeGame(), true);
-    this.overlayButton(634, "SAVE RUN & RETURN", () =>
-      this.finishRun(
-        this.accumulatedScore + this.calculateNightScore(false),
-        this.nightNumber - 1,
-        "You returned to the shadows.",
-      ),
-    );
-    announce("Paused. Press Escape to resume.");
+    this.resetInput();
+    const add = (o) => { this.pauseObjects.push(this.fixed(o, 90)); return o; };
+    const dim = add(this.add.rectangle(195, 422, 390, 844, C.ink, 0.97).setInteractive());
+    dim.on("pointerdown", (_p, _x, _y, e) => e?.stopPropagation());
+    add(label(this, 195, 228, "THE NIGHT CAN WAIT.", 27).setOrigin(0.5));
+    add(label(this, 195, 285, "Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nStun  E     ·     Bite  F\nPause  Escape / P", 16, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(14));
+    add(label(this, 195, 461, "IV blood protects you.\nGrave dirt buys permanent upgrades.", 15, "#dfb778").setOrigin(0.5).setAlign("center").setLineSpacing(8));
+    const resume = button(this, 195, 564, 330, "RESUME THE NIGHT", () => this.resumeGame(), true);
+    const end = button(this, 195, 628, 330, "END RUN", () => this.finishRun("You returned to the shadows."));
+    [resume.bg, resume.caption, end.bg, end.caption].forEach(add);
+    announce("Paused. Escape or Resume continues the night.");
   }
   resumeGame() {
-    if (!this.paused || this.gameOver) return;
-    this.overlay.destroy();
-    this.overlay = null;
-    this.input.keyboard.resetKeys();
-    this.resetMovement();
-    this.time.paused = false;
-    this.tweens.resumeAll();
-    this.physics.resume();
-    this.paused = false;
+    if (!this.paused || this.transitioning) return;
+    this.pauseObjects.forEach((o) => o.destroy()); this.pauseObjects = [];
+    this.resetInput(); this.accumulator = 0; this.paused = false;
     announce("Resumed.");
   }
-  showBanner(title, subtitle) {
-    const box = this.add.container(0, 0).setScrollFactor(0).setDepth(20);
-    box.add(
-      this.add
-        .rectangle(195, 270, 354, 92, C.ink, 0.9)
-        .setStrokeStyle(1, C.line),
-    );
-    box.add(label(this, 195, 252, title, 12, "#dfb778", true).setOrigin(0.5));
-    box.add(label(this, 195, 282, subtitle, 15).setOrigin(0.5));
-    this.tweens.add({
-      targets: box,
-      alpha: 0,
-      delay: 2300,
-      duration: preferences.reducedMotion ? 0 : 600,
-      onComplete: () => box.destroy(),
+  saveProgress() {
+    this.progressSaved = Save.write("vampRunnerProgress", this.world.profile);
+    if (!this.progressSaved) announce("Upgrades and grave dirt last for this session; browser storage is unavailable.");
+  }
+  runSnapshot() {
+    const w = this.world;
+    return { nightNumber: w.night, score: w.score, lives: w.lives, profile: w.profile, stats: w.stats, timeLeft: w.timeLeft, bonus: w.bonus };
+  }
+  completeNight() {
+    if (this.transitioning || this.world.status !== "safe") return;
+    this.transitioning = true; this.resetInput(); this.saveProgress();
+    this.scene.start("Crypt", this.runSnapshot());
+  }
+  finishRun(reason = this.world.reason) {
+    if (this.transitioning) return;
+    this.transitioning = true; this.resetInput(); this.saveProgress();
+    this.scene.start("Score", { score: this.world.score, nights: this.world.night - 1, reason, profile: this.world.profile });
+  }
+  showSunrise() {
+    if (this.transitioning) return;
+    this.transitioning = true; this.resetInput(); this.saveProgress();
+    const glow = this.fixed(this.add.rectangle(195, 422, 390, 844, 0xf2b575, 0.65), 80);
+    this.fixed(label(this, 195, 365, "SUNRISE", 45, "#271d25").setOrigin(0.5), 81);
+    this.fixed(label(this, 195, 417, "The night is over.", 20, "#271d25").setOrigin(0.5), 81);
+    if (!preferences.reducedMotion) this.tweens.add({ targets: glow, alpha: 0.94, duration: 900 });
+    this.time.delayedCall(preferences.reducedMotion ? 450 : 1200, () => {
+      this.scene.start("Score", { score: this.world.score, nights: this.world.night - 1, reason: this.world.reason, profile: this.world.profile });
     });
   }
-  controlMessage(text) {
-    if (this.lastMessage && this.time.now - this.lastMessage < 1000) return;
-    this.lastMessage = this.time.now;
-    const txt = label(this, 195, 656, text, 12, "#eee5d3")
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(18);
-    this.tweens.add({
-      targets: txt,
-      alpha: 0,
-      delay: 1200,
-      duration: 400,
-      onComplete: () => txt.destroy(),
+  showEvents() {
+    for (const event of this.world.events.splice(0)) {
+      if (event.kind === "jump") { Sfx.play("dash"); continue; }
+      if (event.text) { this.message.setText(event.text); this.messageUntil = this.world.elapsed + 2; }
+      if (event.kind === "dirt") this.saveProgress();
+      Sfx.play(event.kind === "hurt" || event.kind === "dead" ? "hit" : event.kind === "safe" ? "safe" : "blood");
+      if (event.kind === "hurt" && !preferences.reducedMotion) this.cameras.main.shake(110, 0.004);
+      if (["bite", "iv", "hurt"].includes(event.kind)) announce(event.text);
+    }
+  }
+  renderWorld() {
+    const w = this.world, p = w.player;
+    this.player.setPosition(p.x, p.y + p.h).setFlipX(p.facing < 0);
+    this.player.setTexture(Math.abs(p.vx) > 10 && p.grounded && Math.floor(w.elapsed * 9) % 2 ? "player_step" : "player");
+    this.player.setAlpha(w.invulnerable > 0 ? (preferences.reducedMotion ? 0.6 : Math.floor(w.elapsed * 12) % 2 ? 0.35 : 1) : 1);
+    if (w.iv > 0) this.player.setTint(0xf6bbcd); else this.player.clearTint();
+    this.cameras.main.scrollX = Math.max(0, Math.min(w.level.width - GAME_W, p.x - 125));
+    this.cameras.main.scrollY = 0;
+    this.dawn.setAlpha(Math.max(0, 1 - w.timeLeft / 32) * 0.6);
+    this.clock.setText(`${Math.ceil(w.timeLeft)}s TO DAWN`).setColor(w.timeLeft <= 15 ? "#ffb777" : "#eee5d3");
+    this.sunBar.setScale(Math.max(0, w.timeLeft / w.level.duration), 1);
+    this.coffins.forEach((o, i) => o.setAlpha(i < w.lives ? 1 : 0.18));
+    this.garlic.forEach((o, i) => o.setFillStyle(i < w.garlicHits ? C.red : C.line));
+    this.wallet.setText(`${w.profile.dirt} GRAVE DIRT`);
+    this.scoreText.setText(`${w.score.toLocaleString()} PTS`);
+    this.routeText.setText(w.iv > 0 ? `IV RUSH ${w.iv.toFixed(1)}s · PROTECTED` : `${w.level.name}   ·   CRYPT ${Math.max(0, Math.ceil((w.level.crypt.x - p.x) / 10))}m →`);
+    this.message.setAlpha(w.elapsed < this.messageUntil ? 1 : 0);
+    w.level.pickups.forEach((pickup, i) => {
+      const sprite = this.pickups[i];
+      sprite.setVisible(pickup.active);
+      sprite.y = pickup.y + (preferences.reducedMotion ? 0 : Math.sin(w.elapsed * 3 + i) * 3);
     });
-  }
-  floatText(x, y, text, color) {
-    const txt = label(this, x, y, text, 10, color, true)
-      .setOrigin(0.5)
-      .setDepth(8);
-    this.tweens.add({
-      targets: txt,
-      y: y - (preferences.reducedMotion ? 0 : 28),
-      alpha: 0,
-      delay: 250,
-      duration: 650,
-      onComplete: () => txt.destroy(),
-    });
-  }
-  burst(x, y, color, count = 10) {
-    if (preferences.reducedMotion) return;
-    for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2,
-        particle = this.add.circle(x, y, 1.5, color).setDepth(4);
-      this.tweens.add({
-        targets: particle,
-        x: x + Math.cos(angle) * 24,
-        y: y + Math.sin(angle) * 24,
-        alpha: 0,
-        duration: 370,
-        onComplete: () => particle.destroy(),
-      });
-    }
-  }
-  updateRadar() {
-    const g = this.minimap,
-      scale = 2,
-      x = 24,
-      y = 187;
-    g.clear();
-    g.fillStyle(C.ink, 0.85);
-    g.fillRoundedRect(x - 5, y - 5, 50, 70, 4);
-    for (let r = 0; r < MAP_ROWS; r++)
-      for (let c = 0; c < MAP_COLS; c++)
-        if (this.levelData[r][c] === 1) {
-          g.fillStyle(0x5c6e7b, 0.7);
-          g.fillRect(x + c * scale, y + r * scale, scale, scale);
-        }
-    g.fillStyle(C.mint);
-    g.fillCircle(x + 10.5 * scale, y + 1.5 * scale, 2.5);
-    g.lineStyle(1, C.gold);
-    g.lineBetween(
-      x,
-      y + (this.sunline / TILE) * scale,
-      x + 40,
-      y + (this.sunline / TILE) * scale,
-    );
-    g.fillStyle(0xffa0b2);
-    g.fillCircle(
-      x + (this.player.x / TILE) * scale,
-      y + (this.player.y / TILE) * scale,
-      2,
-    );
-    const delta = this.shelter.y - this.player.y,
-      arrow = delta < -20 ? "↑" : delta > 20 ? "↓" : "◆";
-    this.cryptText.setText(
-      "CRYPT " +
-        arrow +
-        "  " +
-        Math.round(
-          Phaser.Math.Distance.Between(
-            this.player.x,
-            this.player.y,
-            this.shelter.x,
-            this.shelter.y,
-          ) / 10,
-        ) +
-        "m",
-    );
-  }
-  update(time, delta) {
-    if (this.gameOver || this.paused) return;
-    const dt = Math.min(delta, 50) / 1000;
-    this.timeLeft = Math.max(0, this.timeLeft - dt);
-    this.invulnerableFor = Math.max(0, this.invulnerableFor - dt);
-    this.dashCooldown = Math.max(0, this.dashCooldown - dt);
-    this.dashFor = Math.max(0, this.dashFor - dt);
-    if (this.timeLeft <= 0) {
-      this.triggerLose("Dawn found you outside the crypt.");
-      return;
-    }
-    const movement = this.movement(),
-      length = Math.hypot(movement.x, movement.y);
-    if (length > 0.01)
-      this.facing = { x: movement.x / length, y: movement.y / length };
-    const direction = this.dashFor > 0 ? this.dashDirection : movement,
-      speed = this.dashFor > 0 ? DASH_SPEED : PLAYER_SPEED;
-    this.player.setVelocity(direction.x * speed, direction.y * speed);
-    if (direction.x) this.player.setFlipX(direction.x < 0);
-    this.player.setTexture(
-      length > 0 && Math.floor(time / 130) % 2 ? "player_step" : "player",
-    );
-    this.player.setAlpha(
-      this.invulnerableFor > 0
-        ? preferences.reducedMotion
-          ? 0.65
-          : Math.floor(time / 100) % 2
-            ? 0.4
-            : 1
-        : 1,
-    );
-    this.trailTimer -= dt;
-    if (
-      this.dashFor > 0 &&
-      this.trailTimer <= 0 &&
-      !preferences.reducedMotion
-    ) {
-      this.trailTimer = 0.04;
-      const ghost = this.add
-        .image(this.player.x, this.player.y, "player")
-        .setTint(C.red)
-        .setAlpha(0.35)
-        .setDepth(2);
-      this.tweens.add({
-        targets: ghost,
-        alpha: 0,
-        duration: 240,
-        onComplete: () => ghost.destroy(),
-      });
-    }
-    this.updateNPCs(dt * 1000);
-    this.updateSunlight();
-    if (this.player.y + 10 >= this.sunline && !this.isProtected())
-      this.loseLife("You lingered in the sunrise.");
-    if (this.gameOver) return;
-    if (this.timeLeft <= 15 && !this.warningShown) {
-      this.warningShown = true;
-      this.showBanner(
-        "DAWN IS ALMOST HERE",
-        "Forget the blood. Find your coffin.",
-      );
-      announce("Fifteen seconds until dawn.");
-    }
-    const target = this.nearestGlamourTarget();
     this.targetGraphic.clear();
-    for (const npc of this.npcs)
-      if (npc.chasing && npc.stunTimer === 0) {
-        this.targetGraphic.lineStyle(1, C.red, 0.6);
-        this.targetGraphic.strokeCircle(npc.sprite.x, npc.sprite.y, 19);
-        this.targetGraphic.fillStyle(C.red);
-        this.targetGraphic.fillRect(npc.sprite.x - 1, npc.sprite.y - 28, 2, 6);
-        this.targetGraphic.fillCircle(npc.sprite.x, npc.sprite.y - 19, 1);
+    w.level.humans.forEach((h, i) => {
+      const sprite = this.humans[i];
+      sprite.setPosition(h.x, h.y + h.h).setFlipX(h.direction < 0).setTexture(h.state === "vampire" ? "npc_glamoured" : "npc_plain");
+      if (h.state === "stunned") {
+        this.targetGraphic.lineStyle(2, C.gold, 0.8); this.targetGraphic.strokeEllipse(h.x, h.y - 9, 28, 9);
       }
-    if (target) {
-      this.targetGraphic.lineStyle(1, C.mint, 0.8);
-      this.targetGraphic.strokeCircle(target.sprite.x, target.sprite.y, 23);
+    });
+    const nearby = targetHuman(w), biteTarget = targetHuman(w, 52, true);
+    this.hint.setText(biteTarget ? "STUNNED · BITE NOW +250" : nearby?.state === "stunned" ? "GET CLOSER TO BITE" : nearby ? "STUN THE HUMAN → THEN BITE" : p.x < 300 ? "JUMP UP TO ROOFTOPS FOR MORE DIRT" : "REACH YOUR CRYPT BEFORE SUNRISE →");
+    this.stunButton.bg.setAlpha(nearby && nearby.state !== "stunned" && w.stunCooldown === 0 ? 1 : 0.5);
+    this.biteButton.bg.setAlpha(biteTarget ? 1 : 0.5);
+    this.moveButtons.forEach(({ bg, direction }) => bg.setFillStyle([...this.held.values()].includes(direction) ? 0x384756 : C.panel));
+  }
+  update(_time, delta) {
+    if (this.paused || this.transitioning) return;
+    const key = (name) => this.keys[name]?.isDown;
+    const move = Math.max(-1, Math.min(1, (key("RIGHT") || key("D") ? 1 : 0) - (key("LEFT") || key("A") || key("Q") ? 1 : 0) + [...this.held.values()].reduce((a, b) => a + b, 0)));
+    this.accumulator += Math.min(delta / 1000, 0.05);
+    while (this.accumulator >= STEP) {
+      step(this.world, { move, ...this.pending }, STEP);
+      this.pending = {}; this.accumulator -= STEP;
     }
-    this.glamourStatus.setText(
-      target
-        ? "E / CHARM · RECRUIT AN ALLY"
-        : this.glamouredEver
-          ? "ALLIES " + this.glamouredEver + " · THEY COLLECT BLOOD FOR YOU"
-          : "",
-    );
-    this.glamourButton.setAlpha(target ? 1 : 0.65);
-    this.dashLabel.setText(
-      this.dashCooldown > 0 ? this.dashCooldown.toFixed(1) + "s" : "DASH",
-    );
-    this.dashButton.setAlpha(this.dashCooldown > 0 ? 0.5 : 1);
-    this.updateUI();
-    this.updateRadar();
+    this.showEvents(); this.renderWorld();
+    if (this.world.status === "safe") this.completeNight();
+    else if (this.world.status === "dead") this.showSunrise();
+  }
+}
+
+// Menus own an unscrolled camera. No gameplay container can offset their hit areas.
+class CryptScene extends Phaser.Scene {
+  constructor() { super("Crypt"); }
+  init(data = {}) {
+    this.run = { ...data, profile: cleanProgress(data.profile) };
+    this.transitioning = false;
+    this.storageOK = true;
+  }
+  create() {
+    this.cameras.main.setScroll(0, 0);
+    vignette(this);
+    label(this, 24, 31, "SAFE UNTIL THE NEXT SUNSET", 11, "#90d9bf", true);
+    label(this, 24, 90, `NIGHT ${String(this.run.nightNumber).padStart(2, "0")} SURVIVED.`, 28);
+    label(this, 24, 137, "Rest. Grow stronger. Run again.", 17, "#acbdc9");
+    label(this, 24, 190, this.run.score.toLocaleString(), 39);
+    label(this, 25, 236, "RUN SCORE", 11, "#acbdc9", true);
+    this.balance = label(this, 365, 196, "", 27, "#dfb778").setOrigin(1, 0);
+    label(this, 365, 235, "GRAVE DIRT", 11, "#acbdc9", true).setOrigin(1, 0);
+    label(this, 24, 281, `${this.run.stats?.turned || 0} humans turned   ·   ${Math.ceil(this.run.timeLeft)}s spared`, 13, "#acbdc9");
+    label(this, 24, 324, "PERMANENT UPGRADES", 11, "#dfb778", true);
+    this.shop = UPGRADES.map((upgrade, i) => {
+      const y = 365 + i * 85;
+      const name = label(this, 24, y, "", 19);
+      label(this, 24, y + 29, upgrade.detail, 12, "#a9bac8").setWordWrapWidth(205);
+      const buy = button(this, 302, y + 19, 127, "", () => this.buy(upgrade.key));
+      return { upgrade, name, buy };
+    });
+    this.restore = button(this, 195, 640, 342, "", () => this.restoreCoffin());
+    this.saveNote = label(this, 195, 678, "", 11, "#a9bac8").setOrigin(0.5);
+    this.next = button(this, 195, 724, 342, "NEXT NIGHT →", () => this.nextNight(), true);
+    button(this, 195, 788, 342, "END RUN & RECORD SCORE", () => this.endRun());
+    onKey(this, "keydown-ENTER", () => this.nextNight());
+    this.persist();
+    this.refreshShop();
+    announce(`Night ${this.run.nightNumber} survived. Buy upgrades or press Enter for the next night.`);
+  }
+  persist() { this.storageOK = Save.write("vampRunnerProgress", this.run.profile); }
+  buy(key) {
+    if (this.transitioning || !purchase(this.run.profile, key)) return;
+    this.persist(); this.refreshShop(); Sfx.play("blood");
+  }
+  restoreCoffin() {
+    if (this.transitioning || this.run.lives >= MAX_LIVES || this.run.profile.dirt < 18) return;
+    this.run.profile.dirt -= 18; this.run.lives++;
+    this.persist(); this.refreshShop(); Sfx.play("safe");
+  }
+  refreshShop() {
+    this.balance.setText(String(this.run.profile.dirt));
+    this.shop.forEach(({ upgrade, name, buy }) => {
+      const level = this.run.profile.upgrades[upgrade.key], cost = upgrade.cost * (level + 1);
+      name.setText(`${upgrade.name} ${level}/3`);
+      buy.caption.setText(level >= 3 ? "MAXED" : `${cost} DIRT`);
+      buy.bg.setAlpha(level >= 3 || this.run.profile.dirt < cost ? 0.4 : 1);
+    });
+    this.restore.caption.setText(this.run.lives >= MAX_LIVES ? "3 / 3 COFFINS · RESTED" : `COFFINS ${this.run.lives}/3 · RESTORE FOR 18 DIRT`);
+    this.restore.bg.setAlpha(this.run.lives >= MAX_LIVES || this.run.profile.dirt < 18 ? 0.4 : 1);
+    this.saveNote.setText(this.storageOK ? "Grave dirt and upgrades stay with you." : "Browser saving unavailable · kept for this session.");
+  }
+  nextNight() {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    this.scene.start("Game", { nightNumber: this.run.nightNumber + 1, score: this.run.score, lives: this.run.lives, profile: this.run.profile });
+  }
+  endRun() {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    this.scene.start("Score", { score: this.run.score, nights: this.run.nightNumber, reason: "You made it home before dawn.", profile: this.run.profile });
   }
 }
 
@@ -1497,6 +775,7 @@ class ScoreScene extends Phaser.Scene {
     this.reason = data.reason || "";
     this.submitted = false;
     this.playerName = "";
+    this.profile = data.profile ?? Save.progress();
   }
   create() {
     vignette(this);
@@ -1568,16 +847,16 @@ class ScoreScene extends Phaser.Scene {
       728,
       342,
       "RUN AGAIN  →",
-      () => this.scene.start("Game"),
+      () => this.scene.start("Game", { profile: this.profile }),
       true,
     );
     button(this, 195, 790, 342, "BACK TO THE CITY", () =>
       this.scene.start("Menu"),
     );
-    this.input.keyboard.on("keydown", (e) => {
+    onKey(this, "keydown", (e) => {
       if (e.repeat) return;
       if (e.key === "Enter") {
-        this.scene.start("Game");
+        this.scene.start("Game", { profile: this.profile });
         return;
       }
       if (e.key === "Escape") {
@@ -1694,10 +973,9 @@ const config = {
   height: GAME_H,
   backgroundColor: "#0b1018",
   parent: "game",
-  physics: { default: "arcade", arcade: { gravity: { y: 0 }, debug: false } },
   input: { activePointers: 3, keyboard: true },
   render: { antialias: true, roundPixels: true },
-  scene: [BootScene, MenuScene, GameScene, ScoreScene],
+  scene: [BootScene, MenuScene, GameScene, CryptScene, ScoreScene],
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
 };
 if (typeof module !== "undefined" && module.exports)
@@ -1705,6 +983,7 @@ if (typeof module !== "undefined" && module.exports)
     BootScene,
     MenuScene,
     GameScene,
+    CryptScene,
     ScoreScene,
     Save,
     config,

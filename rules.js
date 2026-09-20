@@ -1,396 +1,190 @@
-/* Shared, deterministic game rules. No rendering or browser dependency. */
+/* The platformer simulation used by both the browser and the Node tests. */
 (function (root) {
   "use strict";
-  const TILE = 40;
-  const MAP_COLS = 20;
-  const MAP_ROWS = 30;
-  const MAP_W = MAP_COLS * TILE;
-  const MAP_H = MAP_ROWS * TILE;
-
-  const PLAYER_SPEED = 200;
-  const SUNRISE_DURATION = 90; // seconds
-  const GARLIC_HITS_PER_LIFE = 3;
-  const MAX_LIVES = 3;
-  const NPC_SPEED = 55;
-  const PRIEST_SPEED = 42;
-  const GLAMOUR_RANGE = 72;
-
-  // ── Map variants ─────────────────────────────────────────────────────────────
-  // variant 0 = horizontal corridors (original)
-  // variant 1 = dense chokepoints
-  // variant 2 = open-centre with perimeter pillars
-
-  function buildLevelData(variant = 0) {
-    const R = MAP_ROWS;
-    const C = MAP_COLS;
-    const grid = Array.from({ length: R }, () => new Array(C).fill(0));
-
-    // Always border walls
-    for (let c = 0; c < C; c++) {
-      grid[0][c] = 1;
-      grid[R - 1][c] = 1;
-    }
-    for (let r = 0; r < R; r++) {
-      grid[r][0] = 1;
-      grid[r][C - 1] = 1;
-    }
-
-    if (variant === 0) {
-      // Horizontal corridor walls — original layout
-      [
-        [4, 2, 8],
-        [4, 11, 17],
-        [8, 4, 9],
-        [8, 12, 18],
-        [12, 1, 6],
-        [12, 9, 14],
-        [16, 3, 10],
-        [16, 13, 17],
-        [20, 2, 7],
-        [20, 11, 16],
-        [24, 4, 9],
-        [24, 12, 18],
-      ].forEach(([r, c1, c2]) => {
-        for (let c = c1; c <= c2; c++) grid[r][c] = 1;
-      });
-
-      [
-        [6, 7],
-        [6, 12],
-        [10, 3],
-        [10, 16],
-        [14, 9],
-        [18, 7],
-        [22, 10],
-        [26, 5],
-        [26, 14],
-      ].forEach(([r, c]) => {
-        if (!grid[r][c]) grid[r][c] = 4;
-      });
-    } else if (variant === 1) {
-      // Dense chokepoints — tight vertical slots force the player to pick routes
-      [
-        [3, 1, 7],
-        [3, 13, 19],
-        [6, 4, 10],
-        [6, 11, 16],
-        [9, 2, 6],
-        [9, 14, 18],
-        [13, 5, 9],
-        [13, 12, 17],
-        [17, 1, 8],
-        [17, 11, 15],
-        [21, 3, 9],
-        [21, 12, 18],
-        [25, 2, 7],
-        [25, 13, 18],
-      ].forEach(([r, c1, c2]) => {
-        for (let c = c1; c <= c2; c++) grid[r][c] = 1;
-      });
-
-      // Vertical dividers to create narrow gaps
-      [
-        [5, 10],
-        [10, 10],
-        [15, 10],
-        [20, 10],
-      ].forEach(([r, c]) => {
-        grid[r][c] = 1;
-        grid[r + 1][c] = 1;
-      });
-
-      [
-        [5, 5],
-        [8, 14],
-        [11, 3],
-        [14, 16],
-        [18, 8],
-        [22, 11],
-        [26, 6],
-        [26, 15],
-        [4, 10],
-      ].forEach(([r, c]) => {
-        if (!grid[r][c]) grid[r][c] = 4;
-      });
-    } else {
-      // Open centre — perimeter rooms with 3×3 pillar clusters in the open field
-      const pillars = [
-        [4, 3],
-        [4, 4],
-        [5, 3],
-        [4, 16],
-        [4, 17],
-        [5, 17],
-        [8, 7],
-        [8, 8],
-        [9, 7],
-        [8, 12],
-        [8, 13],
-        [9, 13],
-        [14, 3],
-        [14, 4],
-        [15, 3],
-        [14, 16],
-        [14, 17],
-        [15, 17],
-        [19, 6],
-        [19, 7],
-        [20, 6],
-        [19, 12],
-        [19, 13],
-        [20, 13],
-        [24, 4],
-        [24, 5],
-        [25, 4],
-        [24, 15],
-        [24, 16],
-        [25, 16],
-      ];
-      pillars.forEach(([r, c]) => {
-        grid[r][c] = 1;
-      });
-
-      // Two horizontal half-walls at mid-map to break line-of-sight
-      for (let c = 1; c <= 6; c++) grid[12][c] = 1;
-      for (let c = 13; c <= 18; c++) grid[12][c] = 1;
-      for (let c = 1; c <= 6; c++) grid[22][c] = 1;
-      for (let c = 13; c <= 18; c++) grid[22][c] = 1;
-
-      [
-        [6, 10],
-        [10, 5],
-        [10, 15],
-        [16, 9],
-        [16, 11],
-        [20, 4],
-        [20, 16],
-        [27, 8],
-        [27, 13],
-      ].forEach(([r, c]) => {
-        if (!grid[r][c]) grid[r][c] = 4;
-      });
-    }
-
-    grid[1][10] = 5; // shelter always at top-centre
-    return grid;
+  const FLOOR = 625, GRAVITY = 1450, JUMP_SPEED = 600, PLAYER_SPEED = 220;
+  const MAX_LIVES = 3, GARLIC_HITS_PER_LIFE = 3, STEP = 1 / 120;
+  const DISTRICTS = ["THE OLD QUARTER", "CATHEDRAL ROW", "HOLLOW GARDENS"];
+  const UPGRADES = [
+    { key: "stride", name: "Velvet boots", detail: "+18 running speed per level", cost: 20 },
+    { key: "stun", name: "Mesmer eyes", detail: "+1 second to bite a stunned human", cost: 16 },
+    { key: "iv", name: "Deep veins", detail: "+2 seconds of IV protection", cost: 24 },
+  ];
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const integer = (n, fallback = 0) => Number.isFinite(n) ? Math.max(0, Math.floor(n)) : fallback;
+  function cleanProgress(value) {
+    return { dirt: Math.min(999999, integer(value?.dirt)), upgrades: Object.fromEntries(UPGRADES.map(({ key }) => [key, clamp(integer(value?.upgrades?.[key]), 0, 3)])) };
   }
-
-  // NPC starting positions per map variant
-  function getNPCSpawns(variant = 0) {
-    const spawns = [
-      // variant 0 — original
-      [
-        { r: 3, c: 4, type: "priest" },
-        { r: 3, c: 14, type: "priest" },
-        { r: 7, c: 2, type: "priest" },
-        { r: 7, c: 11, type: "priest" },
-        { r: 11, c: 7, type: "priest" },
-        { r: 23, c: 4, type: "priest" },
-        { r: 5, c: 3, type: "garlic" },
-        { r: 5, c: 16, type: "garlic" },
-        { r: 9, c: 5, type: "garlic" },
-        { r: 9, c: 13, type: "garlic" },
-        { r: 17, c: 5, type: "garlic" },
-        { r: 17, c: 14, type: "garlic" },
-        { r: 6, c: 10, type: "plain" },
-        { r: 13, c: 3, type: "plain" },
-        { r: 15, c: 13, type: "plain" },
-        { r: 19, c: 6, type: "plain" },
-        { r: 21, c: 15, type: "plain" },
-        { r: 25, c: 8, type: "plain" },
-      ],
-      // variant 1 — dense chokepoints
-      [
-        { r: 4, c: 9, type: "priest" },
-        { r: 4, c: 11, type: "priest" },
-        { r: 8, c: 2, type: "priest" },
-        { r: 8, c: 17, type: "priest" },
-        { r: 16, c: 10, type: "priest" },
-        { r: 24, c: 9, type: "priest" },
-        { r: 7, c: 3, type: "garlic" },
-        { r: 7, c: 17, type: "garlic" },
-        { r: 12, c: 3, type: "garlic" },
-        { r: 12, c: 18, type: "garlic" },
-        { r: 19, c: 5, type: "garlic" },
-        { r: 19, c: 16, type: "garlic" },
-        { r: 6, c: 11, type: "plain" },
-        { r: 11, c: 6, type: "plain" },
-        { r: 14, c: 12, type: "plain" },
-        { r: 20, c: 9, type: "plain" },
-        { r: 23, c: 5, type: "plain" },
-        { r: 27, c: 14, type: "plain" },
-      ],
-      // variant 2 — open centre
-      [
-        { r: 3, c: 5, type: "priest" },
-        { r: 3, c: 15, type: "priest" },
-        { r: 7, c: 10, type: "priest" },
-        { r: 13, c: 9, type: "priest" },
-        { r: 18, c: 4, type: "priest" },
-        { r: 23, c: 14, type: "priest" },
-        { r: 6, c: 3, type: "garlic" },
-        { r: 6, c: 17, type: "garlic" },
-        { r: 11, c: 7, type: "garlic" },
-        { r: 11, c: 12, type: "garlic" },
-        { r: 17, c: 9, type: "garlic" },
-        { r: 21, c: 15, type: "garlic" },
-        { r: 5, c: 10, type: "plain" },
-        { r: 10, c: 4, type: "plain" },
-        { r: 13, c: 14, type: "plain" },
-        { r: 18, c: 11, type: "plain" },
-        { r: 23, c: 5, type: "plain" },
-        { r: 26, c: 10, type: "plain" },
-      ],
-    ];
-    return spawns[variant] || spawns[0];
-  }
-
-  function nightSettings(night) {
-    const n = Math.max(1, Math.floor(night) || 1);
-    return {
-      duration: Math.max(40, SUNRISE_DURATION - (n - 1) * 6),
-      speed: Math.min(2.1, 1 + (n - 1) * 0.08),
-      variant: (n - 1) % 3,
-    };
-  }
-
-  function timeRatio(left, duration) {
-    return Math.max(0, Math.min(1, left / Math.max(1, duration)));
-  }
-
-  // Dawn follows from the south; the northern crypt remains safe until time runs out.
-  function sunlightBoundary(left, duration) {
-    return MAP_H * timeRatio(left, duration);
-  }
-
-  function nightScore(stats, survived) {
-    const survival = survived
-      ? stats.night * 500 + Math.ceil(stats.timeLeft) * 15
-      : 0;
-    return Math.max(
-      0,
-      survival + stats.blood * 300 + stats.allies * 150 - stats.lost * 200,
-    );
-  }
-
-  function movementVector(x, y) {
-    const length = Math.hypot(x, y);
-    const divisor = Math.max(1, length);
-    return { x: x / divisor, y: y / divisor };
-  }
-
-  function walkable(grid, row, col) {
-    return !!grid[row] && grid[row][col] !== undefined && grid[row][col] !== 1;
-  }
-
-  function nearestOpenCell(grid, row, col) {
-    if (walkable(grid, row, col)) return { r: row, c: col };
-    let nearest = null,
-      distance = Infinity;
-    for (let r = 1; r < grid.length - 1; r++) {
-      for (let c = 1; c < grid[r].length - 1; c++) {
-        const d = Math.abs(r - row) + Math.abs(c - col);
-        if (walkable(grid, r, c) && d < distance) {
-          nearest = { r, c };
-          distance = d;
-        }
-      }
-    }
-    return nearest;
-  }
-
-  // Tile-centre waypoints stop helpers and hunters getting stuck against walls.
-  function findPath(grid, from, to) {
-    const start = nearestOpenCell(grid, from.r, from.c);
-    const end = nearestOpenCell(grid, to.r, to.c);
-    if (!start || !end) return [];
-    const key = (p) => p.r + "," + p.c;
-    const queue = [start],
-      visited = new Set([key(start)]),
-      parent = new Map();
-    for (let i = 0; i < queue.length; i++) {
-      const point = queue[i];
-      if (point.r === end.r && point.c === end.c) {
-        const path = [point];
-        while (parent.has(key(path[0]))) path.unshift(parent.get(key(path[0])));
-        return path;
-      }
-      for (const [dr, dc] of [
-        [-1, 0],
-        [0, 1],
-        [1, 0],
-        [0, -1],
-      ]) {
-        const next = { r: point.r + dr, c: point.c + dc };
-        if (walkable(grid, next.r, next.c) && !visited.has(key(next))) {
-          visited.add(key(next));
-          parent.set(key(next), point);
-          queue.push(next);
-        }
-      }
-    }
-    return [];
-  }
-
-  function clearSight(grid, a, b) {
-    const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 8));
-    for (let i = 0; i <= steps; i++) {
-      const x = a.x + ((b.x - a.x) * i) / steps,
-        y = a.y + ((b.y - a.y) * i) / steps;
-      if (!walkable(grid, Math.floor(y / TILE), Math.floor(x / TILE)))
-        return false;
-    }
+  function purchase(profile, key) {
+    const item = UPGRADES.find((item) => item.key === key);
+    if (!item || profile.upgrades[key] >= 3) return false;
+    const cost = item.cost * (profile.upgrades[key] + 1);
+    if (profile.dirt < cost) return false;
+    profile.dirt -= cost;
+    profile.upgrades[key]++;
     return true;
   }
-
+  function nightSettings(night) {
+    const n = Math.max(1, integer(night, 1));
+    return { night: n, variant: (n - 1) % 3, duration: Math.max(50, 85 - (n - 1) * 5), speed: Math.min(1.65, 1 + (n - 1) * 0.06) };
+  }
+  function buildLevel(night = 1) {
+    const settings = nightSettings(night), variant = settings.variant;
+    const width = 3400 + variant * 180, platforms = [], pickups = [], hazards = [], humans = [];
+    const gaps = [{ x: 870 + variant * 25, width: 88 + variant * 8 }, { x: 1830 + variant * 40, width: 96 + variant * 8 }, { x: 2800 + variant * 45, width: 102 + variant * 8 }];
+    let edge = 0;
+    for (const gap of gaps) {
+      platforms.push({ x: edge, y: FLOOR, w: gap.x - edge, h: 120, ground: true });
+      edge = gap.x + gap.width;
+    }
+    platforms.push({ x: edge, y: FLOOR, w: width - edge, h: 120, ground: true });
+    const add = (kind, x, y, value = 1) => pickups.push({ id: pickups.length, kind, x, y, value, active: true });
+    for (let section = 0; section < 3; section++) {
+      const x = 320 + section * 970 + variant * section * 35;
+      // Optional alley: two jumps to the rooftops, then back to the street.
+      platforms.push({ x, y: 531, w: 140, h: 16 });
+      platforms.push({ x: x + 145, y: 439, w: 185, h: 16 });
+      platforms.push({ x: x + 350, y: 531, w: 105, h: 16 });
+      add("dirt", x + 44, 509, 3);
+      add("dirt", x + 90, 509, 3);
+      add("dirt", x + 190, 417, 5);
+      add("dirt", x + 238, 417, 5);
+      add(section === 1 ? "syringe" : "iv", x + 291, 411);
+      add("syringe", x + 401, 507);
+      hazards.push({ kind: section === 1 || variant === 1 ? "cross" : "garlic", x: x + 330, y: FLOOR - 18, w: 27, h: 36 });
+      const hx = x + 175;
+      humans.push({ id: humans.length, x: hx, y: FLOOR - 38, w: 24, h: 38, home: hx, min: x + 40, max: x + 260, direction: section % 2 ? -1 : 1, behavior: ["wander", "flee", "brave"][(section + variant) % 3], state: "human", stunned: 0 });
+    }
+    [150, 200, 250].forEach((x) => add("dirt", x, FLOOR - 22));
+    add("syringe", 780, FLOOR - 28);
+    add("syringe", 1710 + variant * 25, FLOOR - 28);
+    add("syringe", 2690 + variant * 30, FLOOR - 28);
+    for (const gap of gaps) {
+      [35, 75].forEach((offset) => add("dirt", gap.x - offset, FLOOR - 22));
+      add("dirt", gap.x + gap.width / 2, FLOOR - 95, 3);
+    }
+    if (variant > 0) hazards.push({ kind: "garlic", x: 2100, y: FLOOR - 18, w: 27, h: 36 });
+    return { ...settings, name: DISTRICTS[variant], width, platforms, pickups, hazards, humans, gaps, crypt: { x: width - 100, y: FLOOR }, checkpoints: [80, gaps[0].x + gaps[0].width + 70, gaps[1].x + gaps[1].width + 70, gaps[2].x + gaps[2].width + 70] };
+  }
+  function createWorld(data = {}) {
+    const level = buildLevel(data.nightNumber), profile = cleanProgress(data.profile);
+    return { level, profile, night: level.night, timeLeft: level.duration, score: integer(data.score), lives: clamp(integer(data.lives, MAX_LIVES), 1, MAX_LIVES), garlicHits: 0,
+      player: { x: 80, y: FLOOR - 42, w: 24, h: 42, vx: 0, vy: 0, grounded: true, facing: 1 }, checkpoint: 80, status: "playing", reason: "", iv: 0, invulnerable: 0, coyote: 0.12, jumpBuffer: 0, stunCooldown: 0, elapsed: 0, stats: { blood: 0, turned: 0, dirt: 0 }, events: [] };
+  }
+  function overlap(a, b) { return Math.abs(a.x - b.x) < (a.w + b.w) / 2 && a.y < b.y + b.h && a.y + a.h > b.y; }
+  function lose(world, reason) {
+    if (world.status !== "playing") return;
+    world.status = "dead"; world.reason = reason;
+    world.player.vx = world.player.vy = 0;
+    world.events.push({ kind: "dead", text: reason });
+  }
+  function hurt(world, kind) {
+    if (world.status !== "playing" || world.invulnerable > 0 || (world.iv > 0 && kind !== "fall")) return false;
+    if (kind === "garlic") world.garlicHits++;
+    if (kind !== "garlic" || world.garlicHits >= GARLIC_HITS_PER_LIFE) { world.lives--; world.garlicHits = 0; }
+    world.invulnerable = 1.4;
+    world.events.push({ kind: "hurt", text: kind === "garlic" && world.garlicHits ? `Garlic ${world.garlicHits}/3` : "A coffin lost" });
+    if (!world.lives) lose(world, "Your last coffin is gone. The sun rises.");
+    return true;
+  }
+  function collect(world, pickup) {
+    if (!pickup.active || world.status !== "playing") return false;
+    pickup.active = false;
+    let text;
+    if (pickup.kind === "dirt") { world.profile.dirt += pickup.value; world.stats.dirt += pickup.value; world.score += 25 * pickup.value; text = `+${pickup.value} grave dirt`; }
+    else if (pickup.kind === "syringe") { world.garlicHits = Math.max(0, world.garlicHits - 1); world.stats.blood++; world.score += 100; text = "Blood +100 · garlic healed"; }
+    else { world.iv = 6 + 2 * world.profile.upgrades.iv; world.score += 150; text = "IV rush · protected + faster"; }
+    world.events.push({ kind: pickup.kind, text, x: pickup.x, y: pickup.y });
+    return true;
+  }
+  function targetHuman(world, range = 78, stunnedOnly = false) {
+    return world.level.humans.filter((h) => h.state !== "vampire" && (!stunnedOnly || h.state === "stunned") && Math.abs(h.y - world.player.y) < 38 && Math.abs(h.x - world.player.x) < range).sort((a, b) => Math.abs(a.x - world.player.x) - Math.abs(b.x - world.player.x))[0];
+  }
+  function stun(world) {
+    if (world.status !== "playing" || world.stunCooldown > 0) return false;
+    const h = targetHuman(world);
+    if (!h || h.state === "stunned") return false;
+    h.state = "stunned"; h.stunned = 3.5 + world.profile.upgrades.stun; world.stunCooldown = 1;
+    world.events.push({ kind: "stun", text: "Stunned! Get close and bite.", x: h.x, y: h.y });
+    return true;
+  }
+  function bite(world) {
+    if (world.status !== "playing") return false;
+    const h = targetHuman(world, 52, true);
+    if (!h) return false;
+    h.state = "vampire"; h.stunned = 0; world.stats.turned++; world.score += 250;
+    world.events.push({ kind: "bite", text: "+250 · a vampire is born", x: h.x, y: h.y });
+    return true;
+  }
+  function finishNight(world) {
+    if (world.status !== "playing") return false;
+    const bonus = world.night * 500 + Math.ceil(world.timeLeft) * 10;
+    world.score += bonus; world.bonus = bonus; world.status = "safe";
+    world.player.vx = world.player.vy = 0;
+    world.events.push({ kind: "safe", text: "The crypt is yours." });
+    return true;
+  }
+  // A fixed timestep makes jump arcs and hit rules identical at 30/60/120 Hz.
+  function step(world, input = {}, dt = STEP) {
+    if (world.status !== "playing") return;
+    dt = clamp(dt, 0, 1 / 30);
+    const p = world.player;
+    world.elapsed += dt; world.timeLeft = Math.max(0, world.timeLeft - dt);
+    if (!world.timeLeft) { lose(world, "Sunrise caught you outside the crypt."); return; }
+    for (const key of ["iv", "invulnerable", "jumpBuffer", "stunCooldown"]) world[key] = Math.max(0, world[key] - dt);
+    world.coyote = p.grounded ? 0.12 : Math.max(0, world.coyote - dt);
+    if (input.jump) world.jumpBuffer = 0.14;
+    if (input.stun) stun(world);
+    if (input.bite) bite(world);
+    const direction = clamp(input.move || 0, -1, 1);
+    const speed = (PLAYER_SPEED + world.profile.upgrades.stride * 18) * (world.iv > 0 ? 1.18 : 1);
+    const desired = direction * speed, acceleration = (direction ? 1800 : 2200) * dt;
+    p.vx += clamp(desired - p.vx, -acceleration, acceleration);
+    if (direction) p.facing = Math.sign(direction);
+    if (world.jumpBuffer > 0 && world.coyote > 0) {
+      p.vy = -JUMP_SPEED; p.grounded = false; world.coyote = world.jumpBuffer = 0;
+      world.events.push({ kind: "jump" });
+    }
+    const previousBottom = p.y + p.h;
+    p.x = clamp(p.x + p.vx * dt, p.w / 2, world.level.width - p.w / 2);
+    p.vy = Math.min(850, p.vy + GRAVITY * dt); p.y += p.vy * dt; p.grounded = false;
+    if (p.vy >= 0) {
+      let top = Infinity;
+      for (const platform of world.level.platforms) {
+        if (p.x + p.w / 2 > platform.x && p.x - p.w / 2 < platform.x + platform.w && previousBottom <= platform.y + 0.5 && p.y + p.h >= platform.y) top = Math.min(top, platform.y);
+      }
+      if (Number.isFinite(top)) { p.y = top - p.h; p.vy = 0; p.grounded = true; }
+    }
+    if (p.y > 712) {
+      // Falling costs a coffin, including during an IV rush or hit recovery.
+      world.invulnerable = 0; hurt(world, "fall");
+      p.x = world.checkpoint; p.y = FLOOR - p.h; p.vx = p.vy = 0; p.grounded = true;
+      world.coyote = world.jumpBuffer = 0;
+    }
+    if (world.status !== "playing") return;
+    for (const checkpoint of world.level.checkpoints) {
+      if (p.grounded && p.y + p.h === FLOOR && p.x >= checkpoint) world.checkpoint = Math.max(world.checkpoint, checkpoint);
+    }
+    for (const h of world.level.humans) {
+      if (h.state === "stunned") { h.stunned = Math.max(0, h.stunned - dt); if (!h.stunned) h.state = "human"; continue; }
+      if (h.state === "vampire") continue;
+      let direction = h.direction;
+      const nearby = Math.abs(p.x - h.x) < 115 && Math.abs(p.y - h.y) < 45;
+      if (nearby && h.behavior === "flee") direction = Math.sign(h.x - p.x) || 1;
+      if (nearby && h.behavior === "brave") direction = Math.sign(p.x - h.x);
+      h.x = clamp(h.x + direction * (h.behavior === "flee" ? 58 : 30) * world.level.speed * dt, h.min, h.max);
+      if (h.x === h.min) h.direction = 1;
+      if (h.x === h.max) h.direction = -1;
+    }
+    for (const hazard of world.level.hazards) if (overlap(p, { ...hazard, y: hazard.y - hazard.h / 2 })) hurt(world, hazard.kind);
+    if (world.status !== "playing") return;
+    for (const pickup of world.level.pickups) if (pickup.active && overlap(p, { x: pickup.x, y: pickup.y - 13, w: 26, h: 26 })) collect(world, pickup);
+    if (p.x >= world.level.crypt.x - 20 && p.y + p.h >= FLOOR - 50 && p.grounded) finishNight(world);
+  }
   function cleanScores(value) {
     if (!Array.isArray(value)) return [];
-    return value
-      .filter(
-        (s) =>
-          s &&
-          typeof s.name === "string" &&
-          Number.isFinite(s.score) &&
-          s.score >= 0,
-      )
-      .map((s) => ({
-        name:
-          s.name
-            .toUpperCase()
-            .replace(/[^A-Z]/g, "")
-            .slice(0, 7) || "ANON",
-        score: Math.floor(s.score),
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+    return value.filter((s) => s && typeof s.name === "string" && Number.isFinite(s.score) && s.score >= 0).map((s) => ({ name: s.name.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 7) || "ANON", score: Math.floor(s.score) })).sort((a, b) => b.score - a.score).slice(0, 10);
   }
-
-  const api = {
-    TILE,
-    MAP_COLS,
-    MAP_ROWS,
-    MAP_W,
-    MAP_H,
-    PLAYER_SPEED,
-    SUNRISE_DURATION,
-    GARLIC_HITS_PER_LIFE,
-    MAX_LIVES,
-    NPC_SPEED,
-    PRIEST_SPEED,
-    GLAMOUR_RANGE,
-    buildLevelData,
-    getNPCSpawns,
-    nightSettings,
-    timeRatio,
-    sunlightBoundary,
-    nightScore,
-    movementVector,
-    walkable,
-    nearestOpenCell,
-    findPath,
-    clearSight,
-    cleanScores,
-  };
+  const api = { FLOOR, GRAVITY, JUMP_SPEED, PLAYER_SPEED, MAX_LIVES, GARLIC_HITS_PER_LIFE, STEP, DISTRICTS, UPGRADES, cleanProgress, purchase, nightSettings, buildLevel, createWorld, step, hurt, collect, targetHuman, stun, bite, finishNight, cleanScores };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.VampRules = api;
 })(typeof window !== "undefined" ? window : this);

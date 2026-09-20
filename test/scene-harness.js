@@ -13,6 +13,9 @@ class GameObject extends EventEmitter {
     this.key = key;
     this.active = true;
     this.alpha = 1;
+    this.scrollFactorX = this.scrollFactorY = 1;
+    this.width = 0; this.height = 0;
+    this.originX = this.originY = 0.5;
     this.body = { velocity: { x: 0, y: 0 } };
   }
   setVelocity(x, y) {
@@ -36,6 +39,11 @@ class GameObject extends EventEmitter {
     this.alpha = alpha;
     return this;
   }
+  setScrollFactor(x, y = x) { this.scrollFactorX = x; this.scrollFactorY = y; return this; }
+  setOrigin(x, y = x) { this.originX = x; this.originY = y; return this; }
+  setDepth(depth) { this.depth = depth; return this; }
+  setInteractive() { this.interactive = true; return this; }
+  disableInteractive() { this.interactive = false; return this; }
   setFillStyle(color) {
     this.color = color;
     return this;
@@ -58,11 +66,7 @@ class GameObject extends EventEmitter {
   }
 }
 for (const method of [
-  "setOrigin",
-  "setDepth",
-  "setScrollFactor",
-  "setInteractive",
-  "disableInteractive",
+  "setDisplaySize", "setScale", "setVisible",
   "setStrokeStyle",
   "setCircle",
   "setCollideWorldBounds",
@@ -74,12 +78,14 @@ for (const method of [
   "setLineSpacing",
   "clear",
   "fillStyle",
+  "fillGradientStyle",
   "fillRect",
   "fillRoundedRect",
   "fillEllipse",
   "fillCircle",
   "lineStyle",
   "strokeCircle",
+  "strokeEllipse",
   "strokeRect",
   "strokeRoundedRect",
   "fillTriangle",
@@ -152,6 +158,7 @@ function loadGame() {
   );
   function wire(scene) {
     scene.add = {};
+    scene.objects = [];
     for (const type of [
       "image",
       "rectangle",
@@ -159,7 +166,12 @@ function loadGame() {
       "graphics",
       "container",
     ])
-      scene.add[type] = (x, y, key) => new GameObject(x, y, key);
+      scene.add[type] = (x, y, key, height) => {
+        const obj = new GameObject(x, y, key);
+        if (type === "rectangle") { obj.width = key; obj.height = height; }
+        scene.objects.push(obj);
+        return obj;
+      };
     scene.add.text = (x, y, text) =>
       Object.assign(new GameObject(x, y), { text });
     scene.make = { graphics: () => new GameObject() };
@@ -176,6 +188,7 @@ function loadGame() {
       "shake",
     ])
       scene.cameras.main[fn] = () => {};
+    scene.cameras.main.setScroll = (x, y) => { scene.cameras.main.scrollX = x; scene.cameras.main.scrollY = y; };
     scene.cameras.main.getWorldPoint = (x, y) => ({ x, y });
     scene.physics = {
       paused: false,
@@ -211,7 +224,7 @@ function loadGame() {
         this.paused = false;
       },
     };
-    scene.time = { paused: false, now: 1000 };
+    scene.time = { paused: false, now: 1000, callbacks: [], delayedCall(_delay, callback) { this.callbacks.push(callback); } };
     scene.input = new EventEmitter();
     scene.input.keyboard = new EventEmitter();
     scene.input.keyboard.addKeys = (names) =>
@@ -225,6 +238,22 @@ function loadGame() {
     scene.events = new EventEmitter();
     return scene;
   }
+  // Screen hit test for standalone, unscaled controls, using Phaser 3.60's
+  // InputManager scroll-factor transform. This catches the original Next Night
+  // regression: a fixed display container with a world-scrolling child hit area.
+  function tap(scene, x, y, id = 1) {
+    const camera = scene.cameras.main;
+    const objects = scene.objects.filter((o) => o.active && o.interactive).sort((a, b) => (b.depth || 0) - (a.depth || 0) || scene.objects.indexOf(b) - scene.objects.indexOf(a));
+    for (const o of objects) {
+      const px = x + (camera.scrollX || 0) * o.scrollFactorX;
+      const py = y + (camera.scrollY || 0) * o.scrollFactorY;
+      if (px >= o.x - o.width * o.originX && px <= o.x + o.width * (1 - o.originX) && py >= o.y - o.height * o.originY && py <= o.y + o.height * (1 - o.originY)) {
+        o.emit("pointerdown", { id, x, y }, 0, 0, { stopPropagation() {} });
+        return o;
+      }
+    }
+    return null;
+  }
   return {
     ...context.module.exports,
     context,
@@ -233,6 +262,7 @@ function loadGame() {
     documentEvents,
     elements,
     wire,
+    tap,
   };
 }
 module.exports = { loadGame };
