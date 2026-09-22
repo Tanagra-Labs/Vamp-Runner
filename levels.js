@@ -1,7 +1,7 @@
 /* Authored campaign chapters, assembled from distinct platforming encounters. */
 (function (root) {
   "use strict";
-  const FLOOR = 625, SECTION_WIDTH = 1000;
+  const FLOOR = 625, SECTION_WIDTH = 1000, ONE_WAY_FROM_NIGHT = 7;
   const THEMES = {
     quarter: { name: "Old Quarter", sky: 0x41303e, stone: 0x293742, trim: 0x8b9e98, motif: "city" },
     roofs: { name: "The High Roofs", sky: 0x303657, stone: 0x2c2d44, trim: 0xb1a0bb, motif: "spires" },
@@ -41,7 +41,7 @@
   function nightSettings(night = 1) {
     const n = Number.isFinite(night) ? Math.max(1, Math.floor(night)) : 1;
     const chapter = (n - 1) % CAMPAIGN.length, cycle = Math.floor((n - 1) / CAMPAIGN.length), spec = CAMPAIGN[chapter];
-    return { night: n, chapter, cycle, variant: chapter, duration: spec.seconds - Math.min(28, cycle * 7), speed: Math.min(1.55, 1 + chapter * 0.03 + cycle * 0.07) };
+    return { night: n, chapter, cycle, variant: chapter, oneWay: n >= ONE_WAY_FROM_NIGHT, duration: spec.seconds - Math.min(28, cycle * 7), speed: Math.min(1.55, 1 + chapter * 0.03 + cycle * 0.07) };
   }
   function buildLevel(night = 1, seed = 1) {
     const settings = nightSettings(night), spec = CAMPAIGN[settings.chapter];
@@ -134,9 +134,13 @@
       { key: "dirt", target: 32 + Math.floor(settings.chapter / 3) * 8, reward: 14, title: "Collect grave dirt" },
       settings.chapter % 2 ? { key: "time", target: Math.round(settings.duration * 0.65), reward: 18, title: "Seconds to spare" } : { key: "untouched", target: 0, reward: 18, title: "Lose no coffins" },
     ];
-    return { ...settings, seed: seed >>> 0, name: spec.name, theme: THEMES[spec.theme], width, platforms, gaps, pickups, hazards, humans, sections, checkpoints, contracts, requiredKeys: spec.keys, crypt: { x: width - 110, y: FLOOR } };
+    const gates = settings.oneWay ? sections.slice(1).map((section) => ({
+      x: section.start, checkpoint: section.start + 80,
+      keyIds: sections.slice(0, section.index).filter((s) => s.keyId !== undefined).map((s) => s.keyId),
+    })) : [];
+    return { ...settings, seed: seed >>> 0, name: spec.name, theme: THEMES[spec.theme], width, platforms, gaps, pickups, hazards, humans, sections, checkpoints, gates, contracts, requiredKeys: spec.keys, crypt: { x: width - 110, y: FLOOR } };
   }
-  const api = { FLOOR, SECTION_WIDTH, CAMPAIGN, THEMES, HINTS, nightSettings, buildLevel };
+  const api = { FLOOR, SECTION_WIDTH, ONE_WAY_FROM_NIGHT, CAMPAIGN, THEMES, HINTS, nightSettings, buildLevel };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.VampLevels = api;
 })(typeof window !== "undefined" ? window : this);

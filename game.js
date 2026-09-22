@@ -1,8 +1,8 @@
 // Vamp Runner — a mobile vampire platformer. Phaser 3.60, no build step.
 /* global Phaser, VampRules */
 const {
-  FLOOR, MAX_LIVES, STEP, UPGRADES, COFFIN_COST, CAMPAIGN, createWorld, step,
-  cleanProgress, cleanRun, purchase, targetHuman, cleanScores, contractResults, pulseState, nightSettings,
+  FLOOR, MAX_LIVES, STEP, UPGRADES, COFFIN_COST, GATE_HALF_WIDTH, CAMPAIGN, createWorld, step,
+  cleanProgress, cleanRun, purchase, targetHuman, cleanScores, contractResults, pulseState, gateState, nightSettings,
 } = VampRules;
 const GAME_W = 390,
   GAME_H = 844;
@@ -452,7 +452,7 @@ class GameScene extends Phaser.Scene {
     this.pending = {};
     this.held = new Map();
     this.accumulator = 0;
-    this.messageUntil = 3;
+    this.messageUntil = this.world.level.oneWay ? 5 : 3;
     this.pauseObjects = [];
     this.time.paused = false;
     this.tweens.resumeAll();
@@ -474,8 +474,8 @@ class GameScene extends Phaser.Scene {
       this.resetInput();
     });
     this.renderWorld();
-    this.message.setText(`${this.world.level.name}\nFind ${this.world.level.requiredKeys} blue crypt key${this.world.level.requiredKeys > 1 ? "s" : ""}.`);
-    announce(`Night ${this.world.night}: ${this.world.level.name}. Find ${this.world.level.requiredKeys} crypt keys before sunrise.`);
+    this.message.setText(`${this.world.level.name}\nFind ${this.world.level.requiredKeys} blue crypt key${this.world.level.requiredKeys > 1 ? "s" : ""}.${this.world.level.oneWay ? "\nOne way: gates seal behind you." : ""}`);
+    announce(`Night ${this.world.night}: ${this.world.level.name}. Find ${this.world.level.requiredKeys} crypt keys before sunrise.${this.world.level.oneWay ? " Gates seal behind you when you enter the next section." : ""}`);
   }
   fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
   drawCity() {
@@ -553,6 +553,8 @@ class GameScene extends Phaser.Scene {
     this.hazardSprites = level.hazards.map((h) => this.add.image(h.x, h.y, h.kind).setDepth(6).setDisplaySize(36, 40));
     this.humans = level.humans.map((h) => this.add.image(h.x, h.y + h.h, "npc_plain").setOrigin(0.5, 1).setDisplaySize(38, 42).setDepth(7));
     this.dynamicGraphic = this.add.graphics().setDepth(3);
+    this.gateGraphic = this.add.graphics().setDepth(8);
+    this.gateLabels = level.gates.map((gate) => label(this, gate.x, 316, "", 12, "#dfb778", true).setOrigin(0.5).setDepth(9));
     level.sections.forEach((section) => {
       label(this, section.start + 100, 277, section.name, 12, "#c6bbab", true);
       g.lineStyle(2, 0x8a9696, 0.7); g.lineBetween(section.start + 80, FLOOR - 48, section.start + 80, FLOOR);
@@ -622,6 +624,7 @@ class GameScene extends Phaser.Scene {
     const dim = add(this.add.rectangle(195, 422, 390, 844, C.ink, 0.97).setInteractive());
     dim.on("pointerdown", (_p, _x, _y, e) => e?.stopPropagation());
     add(label(this, 195, 228, "THE NIGHT CAN WAIT.", 27).setOrigin(0.5));
+    if (this.world.level.oneWay) add(label(this, 195, 416, "ONE WAY · GATES SEAL BEHIND YOU", 11, "#dfb778", true).setOrigin(0.5));
     add(label(this, 195, 285, "Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nStun  E     ·     Bite  F\nPause  Escape / P", 16, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(14));
     const contracts = contractResults(this.world).map((c) => `${c.complete ? "✓" : "○"} ${c.title}: ${c.key === "untouched" ? c.value === 0 ? "on track" : "missed" : c.value + "/" + c.target} (+${c.reward} dirt)`);
     add(label(this, 195, 440, "OPTIONAL NIGHT CHALLENGES", 11, "#dfb778", true).setOrigin(0.5));
@@ -673,9 +676,9 @@ class GameScene extends Phaser.Scene {
       if (event.kind === "jump") { Sfx.play("dash"); continue; }
       if (event.text) { this.message.setText(event.text); this.messageUntil = this.world.elapsed + 2; }
       if (event.kind === "dirt") this.saveProgress();
-      if (!["section", "locked"].includes(event.kind)) Sfx.play(event.kind === "hurt" || event.kind === "dead" ? "hit" : event.kind === "safe" ? "safe" : "blood");
+      if (!["section", "locked", "gate-locked"].includes(event.kind)) Sfx.play(event.kind === "hurt" || event.kind === "dead" || event.kind === "gate-sealed" ? "hit" : event.kind === "safe" ? "safe" : "blood");
       if (event.kind === "hurt" && !preferences.reducedMotion) this.cameras.main.shake(110, 0.004);
-      if (["bite", "iv", "hurt", "key", "locked", "section"].includes(event.kind)) announce(event.text);
+      if (["bite", "iv", "hurt", "key", "locked", "section", "gate-locked", "gate-sealed"].includes(event.kind)) announce(event.text);
     }
   }
   renderWorld() {
@@ -693,7 +696,7 @@ class GameScene extends Phaser.Scene {
     this.garlic.forEach((o, i) => o.setFillStyle(i < w.garlicHits ? C.red : C.line));
     this.wallet.setText(`${w.profile.dirt} GRAVE DIRT`);
     this.scoreText.setText(`${w.score.toLocaleString()} PTS`);
-    this.routeText.setText(w.iv > 0 ? `IV RUSH ${w.iv.toFixed(1)}s · PROTECTED` : `${w.level.theme.name.toUpperCase()} · ${Math.round(p.x / w.level.width * 100)}%`);
+    this.routeText.setText(w.iv > 0 ? `IV RUSH ${w.iv.toFixed(1)}s · PROTECTED` : `${w.level.theme.name.toUpperCase()} · ${Math.round(p.x / w.level.width * 100)}%${w.level.oneWay ? " · ONE WAY" : ""}`);
     const nextKey = w.level.pickups.filter((item) => item.kind === "key" && item.active).sort((a, b) => Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
     this.keyText.setText(nextKey ? `KEYS ${w.keys}/${w.level.requiredKeys} · ${nextKey.x < p.x ? "←" : "→"} ${Math.ceil(Math.abs(nextKey.x - p.x) / 10)}m${nextKey.y < p.y - 30 ? " ↑" : ""}` : `CRYPT OPEN · → ${Math.max(0, Math.ceil((w.level.crypt.x - p.x) / 10))}m`);
     this.questText.setText(`TURN ${w.stats.turned}/${w.level.contracts[0].target} · DIRT ${w.stats.dirt}/${w.level.contracts[1].target}`);
@@ -725,7 +728,9 @@ class GameScene extends Phaser.Scene {
     });
     const nearby = targetHuman(w), biteTarget = targetHuman(w, 52, true);
     const section = w.level.sections[Math.min(w.level.sections.length - 1, Math.floor(p.x / 1000))];
-    this.hint.setText(biteTarget ? `BITE NOW · ${biteTarget.stunned.toFixed(1)}s` : nearby?.state === "stunned" ? "GET CLOSER TO BITE" : nearby ? "STUN → BITE · SILENCE THE THREAT" : section.hint);
+    const nextGate = w.level.gates.find((gate) => gate.x > p.x && gate.x - p.x < 210);
+    const gateHint = nextGate ? gateState(w, nextGate) === "locked" ? "KEY FIRST · THE GATE IS LOCKED" : "NO RETURN · CROSS TO SEAL THIS SECTION" : null;
+    this.hint.setText(biteTarget ? `BITE NOW · ${biteTarget.stunned.toFixed(1)}s` : nearby?.state === "stunned" ? "GET CLOSER TO BITE" : nearby ? "STUN → BITE · SILENCE THE THREAT" : gateHint || section.hint);
     this.stunButton.bg.setAlpha(nearby && nearby.state !== "stunned" && w.stunCooldown === 0 ? 1 : 0.5);
     this.biteButton.bg.setAlpha(biteTarget ? 1 : 0.5);
     this.moveButtons.forEach(({ bg, direction }) => bg.setFillStyle([...this.held.values()].includes(direction) ? 0x384756 : C.panel));
@@ -733,6 +738,22 @@ class GameScene extends Phaser.Scene {
   renderEncounters() {
     const w = this.world, g = this.dynamicGraphic;
     g.clear();
+    const gates = this.gateGraphic;
+    gates.clear();
+    w.level.gates.forEach((gate, i) => {
+      const state = gateState(w, gate), color = state === "sealed" ? C.red : state === "locked" ? 0x90d6f5 : C.gold;
+      // Full-height bars make the boundary visible while standing or jumping.
+      if (state !== "open") {
+        gates.fillStyle(color, 0.16); gates.fillRect(gate.x - GATE_HALF_WIDTH, 208, GATE_HALF_WIDTH * 2, FLOOR - 208);
+        gates.lineStyle(3, color, 0.9);
+        for (const x of [-GATE_HALF_WIDTH, 0, GATE_HALF_WIDTH]) gates.lineBetween(gate.x + x, 208, gate.x + x, FLOOR);
+        for (let y = 218; y < FLOOR; y += 38) gates.lineBetween(gate.x - GATE_HALF_WIDTH, y, gate.x + GATE_HALF_WIDTH, y);
+      }
+      gates.fillStyle(color, 0.9); gates.fillRect(gate.x - 27, FLOOR - 5, 54, 5);
+      gates.lineStyle(2, color, 0.65); gates.lineBetween(gate.x - 9, FLOOR - 24, gate.x + 9, FLOOR - 15); gates.lineBetween(gate.x + 9, FLOOR - 15, gate.x - 9, FLOOR - 6);
+      gates.fillStyle(C.ink, 0.95); gates.fillRoundedRect(gate.x - 67, 303, 134, 27, 3);
+      this.gateLabels[i].setText(state === "sealed" ? "SEALED" : state === "locked" ? "KEY FIRST" : "NO RETURN →").setColor(state === "sealed" ? "#f18599" : state === "locked" ? "#90d6f5" : "#dfb778");
+    });
     for (const p of w.level.platforms) {
       if (!p.motion && !p.crumble) continue;
       if (!p.active) { g.lineStyle(1, C.muted, 0.2); g.lineBetween(p.x, p.y, p.x + p.w, p.y); continue; }
@@ -790,6 +811,7 @@ class CryptScene extends Phaser.Scene {
     label(this, 24, 90, this.run.nightNumber % 12 === 0 ? "THE CITY IS YOURS." : `NIGHT ${String(this.run.nightNumber).padStart(2, "0")} SURVIVED.`, 28);
     const next = CAMPAIGN[nightSettings(this.run.nightNumber + 1).chapter];
     label(this, 24, 137, `Next: ${next.name}`, 17, "#acbdc9");
+    if (nightSettings(this.run.nightNumber + 1).oneWay) label(this, 24, 164, "ONE WAY · GATES SEAL BEHIND YOU", 11, "#dfb778", true);
     label(this, 24, 190, this.run.score.toLocaleString(), 39);
     label(this, 25, 236, "RUN SCORE", 11, "#acbdc9", true);
     this.balance = label(this, 365, 196, "", 27, "#dfb778").setOrigin(1, 0);

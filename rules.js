@@ -5,6 +5,7 @@
   const { FLOOR, CAMPAIGN, nightSettings, buildLevel } = Levels;
   const GRAVITY = 1450, JUMP_SPEED = 600, PLAYER_SPEED = 220;
   const MAX_LIVES = 3, GARLIC_HITS_PER_LIFE = 3, STEP = 1 / 120, COFFIN_COST = 32;
+  const GATE_HALF_WIDTH = 12;
   const UPGRADES = [
     { key: "stride", name: "Velvet boots", detail: "+18 running speed per level", cost: 45 },
     { key: "stun", name: "Mesmer eyes", detail: "+1 second to bite a stunned human", cost: 40 },
@@ -38,7 +39,7 @@
       level, profile: cleanProgress(data.profile), night: level.night, seed: level.seed,
       timeLeft: level.duration, score: integer(data.score), lives: clamp(integer(data.lives, MAX_LIVES), 1, MAX_LIVES), garlicHits: 0,
       player: { x: 80, y: FLOOR - 42, w: 24, h: 42, vx: 0, vy: 0, grounded: true, groundId: null, facing: 1 },
-      checkpoint: 80, status: "playing", reason: "", iv: 0, invulnerable: 0,
+      checkpoint: 80, returnLimit: 0, status: "playing", reason: "", iv: 0, invulnerable: 0,
       coyote: 0.12, jumpBuffer: 0, stunCooldown: 0, elapsed: 0, keys: 0,
       stats: { blood: 0, turned: 0, dirt: 0, lost: 0 }, events: [], projectiles: [],
       lastSection: -1, gateMessageAt: -10,
@@ -136,6 +137,37 @@
     const t = ((time + phase) % period) / period;
     return t < 0.5 ? "safe" : t < 0.74 ? "warning" : "active";
   }
+  function gateState(world, gate) {
+    if (world.returnLimit >= gate.x + GATE_HALF_WIDTH) return "sealed";
+    return gate.keyIds.some((id) => world.level.pickups[id].active) ? "locked" : "open";
+  }
+  function updateGates(world) {
+    const p = world.player;
+    if (p.x < world.returnLimit + p.w / 2) {
+      p.x = world.returnLimit + p.w / 2;
+      p.vx = Math.max(0, p.vx);
+    }
+    for (const gate of world.level.gates) {
+      const state = gateState(world, gate);
+      if (state === "sealed") continue;
+      if (state === "locked" && p.x + p.w / 2 > gate.x - GATE_HALF_WIDTH) {
+        p.x = gate.x - GATE_HALF_WIDTH - p.w / 2;
+        p.vx = Math.min(0, p.vx);
+        if (world.elapsed - world.gateMessageAt > 3) {
+          world.gateMessageAt = world.elapsed;
+          world.events.push({ kind: "gate-locked", text: "A blue key is still behind you. Find it to open this gate." });
+        }
+        break;
+      }
+      // Close only once the whole player has crossed; allow local left/right movement.
+      if (p.x - p.w / 2 >= gate.x + GATE_HALF_WIDTH) {
+        world.returnLimit = gate.x + GATE_HALF_WIDTH;
+        // This ground is safe even when crossing in midair, before touching the flag.
+        world.checkpoint = gate.checkpoint;
+        world.events.push({ kind: "gate-sealed", text: "Gate sealed. The route behind you is gone." });
+      }
+    }
+  }
   function updatePlatforms(world, dt) {
     const player = world.player;
     for (const platform of world.level.platforms) {
@@ -232,6 +264,7 @@
     }
     const previousBottom = p.y + p.h;
     p.x = clamp(p.x + p.vx * dt, p.w / 2, world.level.width - p.w / 2);
+    updateGates(world);
     p.vy = Math.min(850, p.vy + GRAVITY * dt); p.y += p.vy * dt;
     p.grounded = false; p.groundId = null;
     if (p.vy >= 0) {
@@ -251,7 +284,7 @@
     }
     if (world.status !== "playing") return;
     for (const checkpoint of world.level.checkpoints) {
-      if (p.grounded && p.y + p.h === FLOOR && p.x >= checkpoint) world.checkpoint = checkpoint;
+      if (checkpoint >= world.returnLimit && p.grounded && p.y + p.h === FLOOR && p.x >= checkpoint) world.checkpoint = checkpoint;
     }
     updateHumans(world, dt);
     for (const hazard of world.level.hazards) {
@@ -277,7 +310,7 @@
       .map((s) => ({ name: s.name.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 7) || "ANON", score: Math.floor(s.score) }))
       .sort((a, b) => b.score - a.score).slice(0, 10);
   }
-  const api = { FLOOR, GRAVITY, JUMP_SPEED, PLAYER_SPEED, MAX_LIVES, GARLIC_HITS_PER_LIFE, STEP, COFFIN_COST, CAMPAIGN, UPGRADES, cleanProgress, cleanRun, purchase, nightSettings, buildLevel, createWorld, step, hurt, collect, targetHuman, stun, bite, finishNight, contractResults, pulseState, cleanScores };
+  const api = { FLOOR, GRAVITY, JUMP_SPEED, PLAYER_SPEED, MAX_LIVES, GARLIC_HITS_PER_LIFE, STEP, COFFIN_COST, GATE_HALF_WIDTH, CAMPAIGN, UPGRADES, cleanProgress, cleanRun, purchase, nightSettings, buildLevel, createWorld, step, hurt, collect, targetHuman, stun, bite, finishNight, contractResults, pulseState, gateState, cleanScores };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.VampRules = api;
 })(typeof window !== "undefined" ? window : this);
