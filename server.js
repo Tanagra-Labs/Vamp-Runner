@@ -10,6 +10,8 @@ const ASSETS = new Map([
   ["/game.js", ["game.js", "text/javascript; charset=utf-8"]],
   ["/rules.js", ["rules.js", "text/javascript; charset=utf-8"]],
   ["/levels.js", ["levels.js", "text/javascript; charset=utf-8"]],
+  ["/audio.js", ["audio.js", "text/javascript; charset=utf-8"]],
+  ["/bat.js", ["bat.js", "text/javascript; charset=utf-8"]],
   ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
 ]);
 

@@ -3,12 +3,14 @@ const assert = require("node:assert/strict");
 const R = require("../rules");
 const { play } = require("./campaign-driver");
 const { loadGame } = require("./scene-harness");
+const B = require("../bat");
+const { fly } = require("./bat-driver");
 const tick = (w, seconds, input = {}) => { for (let i = 0; i < Math.ceil(seconds / R.STEP); i++) R.step(w, input); };
 
 test("campaign chapters are distinct, seeded routes reproduce, and Blood Moon escalates", () => {
   const layouts = Array.from({ length: 12 }, (_, i) => R.buildLevel(i + 1, 42));
   assert.equal(new Set(layouts.map(l=>l.name)).size, 12);
-  assert.equal(new Set(layouts.map(l=>l.theme.name)).size, 6);
+  assert.equal(new Set(layouts.map(l=>l.theme.name)).size, 8);
   assert.equal(new Set(layouts.map(l=>l.sections.map(s=>s.type).join(','))).size, 12);
   assert.deepEqual(R.buildLevel(8, 42), R.buildLevel(8, 42));
   assert.notDeepEqual(R.buildLevel(8, 42).sections, R.buildLevel(8, 7).sections);
@@ -66,8 +68,10 @@ test("hunters visibly wind up, throw damage-dealing garlic, and can be interrupt
   const shot = w.projectiles[0];
   w.player.x = shot.x; w.player.y = shot.y - 5; R.step(w);
   assert.equal(w.garlicHits, 1);
-  hunter.windup = 0.4; w.player.x = hunter.x - 25; w.player.y = hunter.y;
-  assert.equal(R.stun(w), true); assert.equal(hunter.windup, 0);
+  hunter.windup = 0; hunter.cooldown = 2;
+  w.player.x = hunter.x - 25; w.player.y = R.FLOOR - w.player.h; w.player.grounded = true;
+  assert.equal(R.stun(w), true); tick(w, 1.02, { stun: true });
+  assert.equal(hunter.state, "stunned"); assert.equal(hunter.windup, 0);
   assert.equal(R.bite(w), true); assert.equal(hunter.state, 'vampire');
   const before = w.projectiles.length; tick(w, 0.5); assert.ok(w.projectiles.length <= before);
 });
@@ -80,17 +84,27 @@ test("cross hazards and priests only deal coffin damage during their warned acti
   w.elapsed = cross.period * 0.6; R.step(w); assert.equal(w.lives, 3);
   w.elapsed = cross.period * 0.8; R.step(w); assert.equal(w.lives, 2);
   const priest = w.level.humans.find(h=>h.behavior === 'priest');
-  priest.phase = 0; w.player.x = priest.x; w.player.y = priest.y;
-  w.elapsed = 3.8 * 0.8; w.invulnerable = 0;
-  R.stun(w); R.step(w); assert.equal(w.lives, 2, "stunned priests are harmless");
+  priest.phase = 0; w.player.x = priest.x - 25; w.player.y = R.FLOOR - w.player.h;
+  w.elapsed = 3.8 * 0.8; w.invulnerable = 0; w.player.grounded = true;
+  assert.equal(R.stun(w), false, "raised crosses resist glamour");
+  R.step(w); assert.equal(w.lives, 1);
+  w.elapsed = 0; w.invulnerable = 0;
+  assert.equal(R.stun(w), true); tick(w, 1.26, { stun: true });
+  assert.equal(priest.state, "stunned");
+  w.elapsed = 3.8 * 0.8; R.step(w); assert.equal(w.lives, 1, "fully glamoured priests cannot wield the cross");
   R.bite(w); assert.equal(priest.state, 'vampire');
 });
 
 test("a complete campaign preserves the run and supports restoring coffins without paid upgrades", () => {
   let data = {seed:2026}, total = 0;
   for (let nightNumber = 1; nightNumber <= 12; nightNumber++) {
+    if (nightNumber > 1) {
+      const flight = B.createFlight({ ...data, nightNumber });
+      assert.equal(fly(flight).status, "invited");
+      data = { ...data, profile: flight.profile, lives: flight.lives, score: flight.score, timeLeft: flight.timeLeft };
+    }
     const w = R.createWorld({...data, nightNumber});
-    assert.equal(play(w).status, 'safe');
+    assert.equal(play(w).status, 'safe', `night ${nightNumber}`);
     assert.ok(w.score > total); total = w.score;
     assert.equal(w.profile.bestNight, nightNumber);
     while(w.lives < 3 && w.profile.dirt >= R.COFFIN_COST) { w.lives++; w.profile.dirt -= R.COFFIN_COST; }

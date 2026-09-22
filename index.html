@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#0b1018" />
     <meta
       name="description"
-      content="Twelve nights. Six districts. Run, jump, stun and bite your way to the crypt before sunrise in Vamp Runner, from Tanagra Labs."
+      content="Twelve nights. Eight districts. Run, fly, glamour and bite your way home before sunrise in Vamp Runner, from Tanagra Labs."
     />
     <title>Vamp Runner · Tanagra Labs</title>
     <link rel="stylesheet" href="styles.css" />
@@ -24,15 +24,15 @@
         </p>
         <div class="rule"></div>
         <p class="small">
-          Twelve nights. Six districts.<br />A city with no love for the undead.
+          Twelve nights. Eight districts.<br />A city with no love for the undead.
         </p>
-        <p class="edition">RUN. JUMP. STUN. BITE.</p>
+        <p class="edition">RUN. FLY. GLAMOUR. BITE.</p>
       </aside>
       <section class="cabinet" aria-label="Game">
         <div
           id="game"
           tabindex="0"
-          aria-label="Vamp Runner. Enter starts. Left and Right or A and D move. Space jumps. E stuns a nearby human, F bites a stunned human. Escape pauses. Touch controls are shown."
+          aria-label="Vamp Runner. Enter starts. Left and Right or A and D move. Space jumps. Hold E while stationary and facing a human to glamour; approach and press F to bite. In bat flight, hold Space to rise and release to descend. Escape pauses. Touch controls are shown."
         >
           <div id="loading" role="status">
             <span class="eyebrow">THE CITY IS SLEEPING</span>
@@ -61,7 +61,7 @@
           <span class="symbol ally">○</span>
           <div>
             <h2>Make another vampire</h2>
-            <p>Stun, move close, then bite.<br />Turn hunters to stop their attacks.</p>
+            <p>Hold glamour, move close, then bite.<br />Earn dirt and healing. Three bites earn a shield.</p>
           </div>
         </div>
         <div class="rule"></div>
@@ -82,17 +82,18 @@
             <dd>SPACE / ↑ / W / Z</dd>
           </div>
           <div>
-            <dt>Stun</dt>
-            <dd>E</dd>
+            <dt>Glamour</dt>
+            <dd>HOLD E</dd>
           </div>
           <div><dt>Bite</dt><dd>F</dd></div>
+          <div><dt>Bat flight</dt><dd>HOLD SPACE</dd></div>
           <div>
             <dt>Pause</dt>
             <dd>ESC / P</dd>
           </div>
         </dl>
         <p class="small">
-          On touchscreens, hold an arrow and<br />tap Jump, Stun or Bite with your<br />other hand. Save &amp; Quit at the crypt<br />to continue another time.
+          Hold an arrow and tap Jump or Bite.<br />Release movement and hold Glamour<br />to focus. As a bat, hold Flap to rise.<br />Save &amp; Quit at the crypt to continue later.
         </p>
       </aside>
     </main>
@@ -111,6 +112,8 @@
     ></script>
     <script src="levels.js"></script>
     <script src="rules.js"></script>
+    <script src="audio.js"></script>
+    <script src="bat.js"></script>
     <script src="game.js"></script>
   </body>
 </html>

@@ -44,10 +44,10 @@ test("reward routes leave empty ledges, vary cache sizes and keep mandatory keys
   }
 });
 
-test("all six cache climbs work in both directions with starting abilities and preserve later-night exits", () => {
+test("surface cache climbs work in both directions and underground caches remain reachable", () => {
   const covered = new Set();
-  for (const night of [1, 2, 3, 5, 6, 7, 10, 11]) {
-    const w = R.createWorld({ nightNumber: night, seed: 7 }), result = play(w, false, true);
+  for (const [night, seed] of [[1,7],[2,7],[3,7],[3,42],[5,7],[6,7],[7,7],[8,7],[9,7],[10,7],[11,7]]) {
+    const w = R.createWorld({ nightNumber: night, seed }), result = play(w, false, true);
     assert.equal(result.status, "safe", JSON.stringify({ night, ...result }));
     for (const section of w.level.sections.filter(s => s.detour.length > s.route.length)) {
       covered.add(`${section.type}:${section.mirrored}`);
@@ -56,12 +56,12 @@ test("all six cache climbs work in both directions with starting abilities and p
       assert.ok(caches.every(p => !p.active), `missed ${section.type} cache on night ${night}`);
     }
     if ([2, 5, 7, 10].includes(night)) {
-      const direct = R.createWorld({ nightNumber: night, seed: 7 });
+      const direct = R.createWorld({ nightNumber: night, seed });
       assert.equal(play(direct).status, "safe");
       assert.ok(w.stats.dirt > direct.stats.dirt, "the extra climb must earn extra dirt");
     }
   }
-  assert.equal(covered.size, 12, "each of the six cache routes needs forward and mirrored coverage");
+  assert.equal(covered.size, 14, "six surface caches in both directions plus two underground caches");
 });
 
 test("vertical hoists carry passengers and preserve the individual offsets of their rewards", () => {

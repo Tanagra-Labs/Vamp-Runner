@@ -61,9 +61,10 @@ test("stun then bite requires two actions at the correct distances and turns a h
   const w = R.createWorld(), h = w.level.humans[0];
   w.player.x = h.x - 70;
   assert.equal(R.bite(w), false);
-  assert.equal(R.stun(w), true); assert.equal(h.state, "stunned");
+  assert.equal(R.stun(w), true); assert.equal(h.state, "human", "glamour takes focus, not an instant tap");
+  tick(w, 0.77, { stun: true }); assert.equal(h.state, "stunned");
   assert.equal(R.bite(w), false, "must approach the stunned human");
-  w.player.x = h.x - 30;
+  w.player.x = h.x - 25;
   assert.equal(R.bite(w), true); assert.equal(h.state, "vampire");
   assert.equal(R.bite(w), false); assert.equal(w.stats.turned, 1); assert.equal(w.score, 250);
 });
@@ -73,7 +74,7 @@ test("stun expires, cannot reach across rooftops, and humans have distinct movem
   w.player.x = h.x; w.player.y = 430;
   assert.equal(R.stun(w), false);
   w.player.y = R.FLOOR - w.player.h;
-  R.stun(w); tick(w, 3.6);
+  R.stun(w); tick(w, 0.77, { stun: true }); tick(w, 1.5);
   assert.equal(h.state, "human");
   const fleeing = w.level.humans.find((h) => h.behavior === "flee");
   const x = fleeing.x; w.player.x = x - 80;

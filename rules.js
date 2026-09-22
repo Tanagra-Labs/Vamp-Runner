@@ -6,9 +6,10 @@
   const GRAVITY = 1450, JUMP_SPEED = 600, PLAYER_SPEED = 220;
   const MAX_LIVES = 3, GARLIC_HITS_PER_LIFE = 3, STEP = 1 / 120, COFFIN_COST = 32;
   const GATE_HALF_WIDTH = 12;
+  const GLAMOUR_DIRT = 2, FEEDS_PER_VEIL = 3;
   const UPGRADES = [
     { key: "stride", name: "Velvet boots", detail: "+18 running speed per level", cost: 45 },
-    { key: "stun", name: "Mesmer eyes", detail: "+1 second to bite a stunned human", cost: 40 },
+    { key: "stun", name: "Mesmer eyes", detail: "+0.45 seconds to reach and bite", cost: 40 },
     { key: "iv", name: "Deep veins", detail: "+2 seconds of IV protection", cost: 55 },
   ];
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -37,11 +38,12 @@
     const level = buildLevel(data.nightNumber, integer(data.seed, 1));
     return {
       level, profile: cleanProgress(data.profile), night: level.night, seed: level.seed,
-      timeLeft: level.duration, score: integer(data.score), lives: clamp(integer(data.lives, MAX_LIVES), 1, MAX_LIVES), garlicHits: 0,
+      timeLeft: Number.isFinite(data.timeLeft) ? clamp(data.timeLeft, 0, level.duration) : level.duration, score: integer(data.score), lives: clamp(integer(data.lives, MAX_LIVES), 1, MAX_LIVES), garlicHits: 0,
       player: { x: 80, y: FLOOR - 42, w: 24, h: 42, vx: 0, vy: 0, grounded: true, groundId: null, facing: 1 },
       checkpoint: 80, returnLimit: 0, status: "playing", reason: "", iv: 0, invulnerable: 0,
       coyote: 0.12, jumpBuffer: 0, stunCooldown: 0, elapsed: 0, keys: 0,
-      stats: { blood: 0, turned: 0, dirt: 0, lost: 0 }, events: [], projectiles: [],
+      stats: { blood: 0, turned: 0, dirt: 0, lost: 0, glamoured: 0, glamourDirt: 0 }, events: [], projectiles: [],
+      veil: false, feeds: 0, focus: null,
       lastSection: -1, gateMessageAt: -10,
     };
   }
@@ -56,6 +58,12 @@
   }
   function hurt(world, kind) {
     if (world.status !== "playing" || world.invulnerable > 0 || (world.iv > 0 && kind !== "fall")) return false;
+    interruptGlamour(world);
+    if (world.veil && kind !== "fall") {
+      world.veil = false; world.invulnerable = 0.8;
+      world.events.push({ kind: "veil-blocked", text: "Shadow veil absorbed the hit." });
+      return false;
+    }
     if (kind === "garlic") world.garlicHits++;
     if (kind !== "garlic" || world.garlicHits >= GARLIC_HITS_PER_LIFE) {
       world.lives--; world.stats.lost++; world.garlicHits = 0;
@@ -89,24 +97,73 @@
     return world.level.humans.filter((h) => h.state !== "vampire" && (!stunnedOnly || h.state === "stunned") && Math.abs(h.y - world.player.y) < 38 && Math.abs(h.x - world.player.x) < range)
       .sort((a, b) => Math.abs(a.x - world.player.x) - Math.abs(b.x - world.player.x))[0];
   }
+  function canGlamour(world, h) {
+    const p = world.player;
+    return !!h && h.state === "human" && p.grounded && Math.abs(p.vx) < 24 && Math.abs(h.y - p.y) < 18 && (h.x - p.x) * p.facing >= 0 && Math.abs(h.x - p.x) < (h.behavior === "priest" || h.behavior === "hunter" ? 64 : 72) && (h.behavior !== "priest" || pulseState(world.elapsed, 3.8, h.phase) === "safe");
+  }
+  function interruptGlamour(world) {
+    if (!world.focus) return;
+    world.focus = null; world.stunCooldown = Math.max(world.stunCooldown, 0.35);
+    world.events.push({ kind: "focus-lost", text: "Focus broken. Face them, hold still and try again." });
+  }
   function stun(world) {
-    if (world.status !== "playing" || world.stunCooldown > 0) return false;
+    if (world.status !== "playing" || world.stunCooldown > 0 || world.focus) return false;
     const h = targetHuman(world);
-    if (!h || h.state === "stunned") return false;
-    h.state = "stunned"; h.stunned = 3.5 + world.profile.upgrades.stun;
-    h.windup = 0; world.stunCooldown = 1.15;
-    world.events.push({ kind: "stun", text: "Stunned! Get close and bite.", x: h.x, y: h.y });
+    if (!canGlamour(world, h)) return false;
+    world.focus = { id: h.id, elapsed: 0, duration: h.behavior === "priest" ? 1.25 : h.behavior === "hunter" ? 1 : 0.75 };
+    world.events.push({ kind: "focus", text: "Hold glamour. Stay still and keep them in sight." });
     return true;
+  }
+  function updateGlamour(world, input, dt) {
+    if (!input.stun || input.move || input.jump) { interruptGlamour(world); return; }
+    if (!world.focus) stun(world);
+    if (!world.focus) return;
+    const h = world.level.humans.find(h => h.id === world.focus.id);
+    if (!canGlamour(world, h)) { interruptGlamour(world); return; }
+    world.focus.elapsed += dt;
+    if (world.focus.elapsed < world.focus.duration) return;
+    world.focus = null;
+    h.state = "stunned"; h.stunned = 1.4 + world.profile.upgrades.stun * 0.45;
+    h.windup = 0; world.stunCooldown = 1.15;
+    const reward = h.glamourRewarded ? 0 : GLAMOUR_DIRT;
+    if (reward) {
+      h.glamourRewarded = true; world.stats.glamoured++;
+      world.profile.dirt += reward; world.stats.glamourDirt += reward;
+    }
+    world.events.push({ kind: "stun", text: `Glamoured${reward ? ` · +${reward} dirt` : ""}. Get close and bite.`, x: h.x, y: h.y });
   }
   function bite(world) {
     if (world.status !== "playing") return false;
-    const h = targetHuman(world, 52, true);
-    if (!h) return false;
+    const h = targetHuman(world, 30, true), p = world.player;
+    if (!h || !p.grounded || Math.abs(p.y - h.y) >= 18 || (h.x - p.x) * p.facing < 0) return false;
     h.state = "vampire"; h.stunned = 0; world.stats.turned++;
     const points = ["hunter", "priest"].includes(h.behavior) ? 400 : 250;
+    const reward = points === 400 ? 8 : 4, healed = world.garlicHits > 0;
+    world.profile.dirt += reward; world.stats.glamourDirt += reward;
+    world.garlicHits = Math.max(0, world.garlicHits - 1);
+    world.feeds++;
     world.score += points;
-    world.events.push({ kind: "bite", text: `+${points} · a vampire is born`, x: h.x, y: h.y });
+    world.events.push({ kind: "bite", text: `+${points} pts · +${reward} dirt${healed ? " · garlic healed" : ""}\nFeed ${world.feeds}/${FEEDS_PER_VEIL} toward a shadow veil`, x: h.x, y: h.y });
+    if (world.feeds === FEEDS_PER_VEIL) {
+      world.feeds = 0; world.veil = true;
+      world.events.push({ kind: "veil", text: "SHADOW VEIL · next garlic or cross hit blocked" });
+    }
     return true;
+  }
+  function advanceClock(world, seconds) {
+    if (world.status !== "playing" || !Number.isFinite(seconds) || seconds <= 0) return;
+    const before = world.timeLeft;
+    world.timeLeft = Math.max(0, before - seconds);
+    for (const threshold of [60, 30, 10]) {
+      if (before > threshold && world.timeLeft <= threshold && world.timeLeft > 0) {
+        world.events.push({ kind: "dawn-warning", seconds: threshold, text: `${threshold} SECONDS TO SUNRISE\n${world.level.theme.underground ? "Only your sealed crypt protects you." : "Reach your crypt before the light."}` });
+      }
+    }
+    if (!world.timeLeft) lose(world, world.level.theme.underground ? "The dawn curse reached the tunnels. Only your crypt is safe." : "Sunrise caught you outside the crypt.");
+  }
+  function dawnState(world) {
+    const fraction = clamp(1 - world.timeLeft / world.level.duration, 0, 1);
+    return { fraction, glow: clamp((fraction - 0.35) / 0.65, 0, 1), urgent: world.timeLeft <= 30, final: world.timeLeft <= 10 };
   }
   function contractResults(world) {
     return world.level.contracts.map((contract) => {
@@ -229,7 +286,7 @@
       const nearby = Math.abs(p.x - h.x) < 115 && Math.abs(p.y - h.y) < 45;
       if (nearby && h.behavior === "flee") direction = Math.sign(h.x - p.x) || 1;
       if (nearby && h.behavior === "brave") direction = Math.sign(p.x - h.x);
-      h.x = clamp(h.x + direction * (h.behavior === "flee" ? 58 : h.behavior === "priest" ? 42 : 30) * world.level.speed * dt, h.min, h.max);
+      if (world.focus?.id !== h.id) h.x = clamp(h.x + direction * (h.behavior === "flee" ? 58 : h.behavior === "priest" ? 42 : 30) * world.level.speed * dt, h.min, h.max);
       if (h.x === h.min) h.direction = 1;
       if (h.x === h.max) h.direction = -1;
       if (h.behavior === "priest" && pulseState(world.elapsed, 3.8, h.phase) === "active" && overlap(p, { x: h.x, y: h.y - 22, w: 94, h: 60 })) hurt(world, "cross");
@@ -245,13 +302,13 @@
     if (world.status !== "playing") return;
     dt = clamp(dt, 0, 1 / 30);
     const p = world.player;
-    world.elapsed += dt; world.timeLeft = Math.max(0, world.timeLeft - dt);
-    if (!world.timeLeft) { lose(world, "Sunrise caught you outside the crypt."); return; }
+    world.elapsed += dt; advanceClock(world, dt);
+    if (world.status !== "playing") return;
     for (const key of ["iv", "invulnerable", "jumpBuffer", "stunCooldown"]) world[key] = Math.max(0, world[key] - dt);
     updatePlatforms(world, dt);
     world.coyote = p.grounded ? 0.12 : Math.max(0, world.coyote - dt);
     if (input.jump) world.jumpBuffer = 0.14;
-    if (input.stun) stun(world);
+    updateGlamour(world, input, dt);
     if (input.bite) bite(world);
     const direction = clamp(input.move || 0, -1, 1);
     const speed = (PLAYER_SPEED + world.profile.upgrades.stride * 18) * (world.iv > 0 ? 1.18 : 1);
@@ -310,7 +367,7 @@
       .map((s) => ({ name: s.name.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 7) || "ANON", score: Math.floor(s.score) }))
       .sort((a, b) => b.score - a.score).slice(0, 10);
   }
-  const api = { FLOOR, GRAVITY, JUMP_SPEED, PLAYER_SPEED, MAX_LIVES, GARLIC_HITS_PER_LIFE, STEP, COFFIN_COST, GATE_HALF_WIDTH, CAMPAIGN, UPGRADES, cleanProgress, cleanRun, purchase, nightSettings, sectionAt, buildLevel, createWorld, step, hurt, collect, targetHuman, stun, bite, finishNight, contractResults, pulseState, gateState, cleanScores };
+  const api = { FLOOR, GRAVITY, JUMP_SPEED, PLAYER_SPEED, MAX_LIVES, GARLIC_HITS_PER_LIFE, STEP, COFFIN_COST, GATE_HALF_WIDTH, GLAMOUR_DIRT, FEEDS_PER_VEIL, CAMPAIGN, UPGRADES, cleanProgress, cleanRun, purchase, nightSettings, sectionAt, buildLevel, createWorld, step, advanceClock, dawnState, hurt, collect, targetHuman, canGlamour, interruptGlamour, stun, glamour: stun, bite, finishNight, contractResults, pulseState, gateState, cleanScores };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.VampRules = api;
 })(typeof window !== "undefined" ? window : this);

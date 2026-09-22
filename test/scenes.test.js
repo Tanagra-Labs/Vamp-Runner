@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadGame } = require("./scene-harness");
 const R = require("../rules");
+const { fly } = require("./bat-driver");
 function run(data = {}) {
   const h = loadGame(), scene = h.wire(new h.GameScene());
   scene.init(data); scene.create(); return { h, scene };
@@ -17,7 +18,7 @@ test("menu, textures and gameplay construct through the scene adapter", () => {
 
 test("Next Night works by tapping after scrolling, carries progress and allows repeated nights", () => {
   const { h, scene } = run();
-  const crypt = new h.CryptScene();
+  const crypt = new h.CryptScene(), bat = new h.BatScene();
   for (let n = 1; n <= 5; n++) {
     scene.world.level.pickups.filter(p=>p.kind === "key").forEach(p=>R.collect(scene.world, p));
     scene.world.player.x = scene.world.level.crypt.x;
@@ -34,16 +35,29 @@ test("Next Night works by tapping after scrolling, carries progress and allows r
     h.tap(crypt, 195, 724); crypt.input.keyboard.emit("keydown-ENTER");
     assert.equal(crypt.transitions.length, 1, "double taps and Enter cannot skip a night");
     const next = crypt.transitions[0].data;
+    assert.equal(crypt.transitions[0].name, "Bat");
     assert.equal(next.nightNumber, n + 1);
     assert.equal(next.score, data.score);
     assert.equal(next.lives, 3);
     crypt.events.emit("shutdown");
+    h.wire(bat); bat.init(next); bat.create();
+    assert.equal(fly(bat.flight, input => {
+      bat.keys.SPACE.isDown = input.flap; bat.keys.E.isDown = input.glamour;
+      bat.update(0, 1000 * R.STEP);
+    }).status, "invited");
+    bat.update(0, 16);
+    assert.equal(bat.time.callbacks.length, 1); bat.time.callbacks[0]();
+    assert.equal(bat.transitions[0].name, "Game");
+    const entered = bat.transitions[0].data;
+    assert.ok(entered.timeLeft < R.nightSettings(n + 1).duration);
+    assert.equal(entered.score, next.score + 200);
+    bat.events.emit("shutdown");
     // Phaser reuses the same scene object, not a new constructor each night.
-    h.wire(scene); scene.init(next); scene.create();
+    h.wire(scene); scene.init(entered); scene.create();
     assert.equal(scene.world.night, n + 1);
     assert.equal(scene.transitioning, false);
     assert.equal(scene.paused, false);
-    assert.equal(scene.world.timeLeft, R.nightSettings(n + 1).duration);
+    assert.equal(scene.world.timeLeft, entered.timeLeft);
     scene.keys.D.isDown = true; scene.update(120, 33);
     assert.ok(scene.world.player.x > 80, "next night accepts movement");
   }
@@ -80,7 +94,10 @@ test("touch stun and bite turn a human, and collections persist in browser progr
   const { h, scene } = run();
   scene.world.player.x = scene.world.level.humans[0].x - 25;
   h.tap(scene, 223, 737); scene.update(16, 16);
+  assert.equal(scene.world.level.humans[0].state, "human");
+  for (let i = 0; i < 48; i++) scene.update(32 + i * 16, 16);
   assert.equal(scene.world.level.humans[0].state, "stunned");
+  scene.input.emit("pointerupoutside", { id: 1 });
   h.tap(scene, 329, 737); scene.update(32, 16);
   assert.equal(scene.world.stats.turned, 1);
   R.collect(scene.world, scene.world.level.pickups[0]); scene.update(48, 16);

@@ -1,8 +1,8 @@
 // Vamp Runner — a mobile vampire platformer. Phaser 3.60, no build step.
-/* global Phaser, VampRules */
+/* global Phaser, VampRules, VampAudio, VampBat */
 const {
   FLOOR, MAX_LIVES, STEP, UPGRADES, COFFIN_COST, GATE_HALF_WIDTH, CAMPAIGN, createWorld, step,
-  cleanProgress, cleanRun, purchase, targetHuman, cleanScores, contractResults, pulseState, gateState, nightSettings, sectionAt,
+  cleanProgress, cleanRun, purchase, targetHuman, canGlamour, interruptGlamour, advanceClock, dawnState, cleanScores, contractResults, pulseState, gateState, nightSettings, sectionAt,
 } = VampRules;
 const GAME_W = 390,
   GAME_H = 844;
@@ -58,39 +58,7 @@ const Save = {
   },
 };
 let preferences = Save.settings();
-const Sfx = {
-  ctx: null,
-  play(kind) {
-    if (!preferences.sound) return;
-    try {
-      this.ctx ??= new (window.AudioContext || window.webkitAudioContext)();
-      if (this.ctx.state === "suspended") this.ctx.resume().catch(() => {});
-      const notes = {
-        dash: [240, 90],
-        blood: [420, 680],
-        glamour: [300, 600],
-        hit: [140, 65],
-        safe: [440, 660, 880],
-      }[kind] || [440];
-      notes.forEach((frequency, i) => {
-        const oscillator = this.ctx.createOscillator(),
-          gain = this.ctx.createGain();
-        const t = this.ctx.currentTime + i * 0.06;
-        oscillator.type = kind === "hit" ? "triangle" : "sine";
-        oscillator.frequency.setValueAtTime(frequency, t);
-        gain.gain.setValueAtTime(0, t);
-        gain.gain.linearRampToValueAtTime(0.045, t + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-        oscillator.connect(gain);
-        gain.connect(this.ctx.destination);
-        oscillator.start(t);
-        oscillator.stop(t + 0.18);
-      });
-    } catch {
-      /* Audio support never blocks a run. */
-    }
-  },
-};
+const Sfx = VampAudio.createSound({ enabled: () => preferences.sound });
 
 function label(scene, x, y, text, size = 14, color = "#eee5d3", mono = false) {
   return scene.add.text(x, y, text, {
@@ -352,6 +320,7 @@ class MenuScene extends Phaser.Scene {
   }
   create() {
     vignette(this);
+    Sfx.setTheme("quarter");
     label(this, 24, 32, "TANAGRA LABS  /  AFTER HOURS", 10, "#a7b7c3", true);
     label(this, 24, 103, "VAMP", 67);
     label(this, 24, 173, "RUNNER", 58);
@@ -365,7 +334,7 @@ class MenuScene extends Phaser.Scene {
     );
     const progress = Save.progress();
     const medals = progress.medals.reduce((sum, mask) => sum + [1, 2, 4].filter((bit) => mask & bit).length, 0);
-    label(this, 26, 313, `12 NIGHTS · 6 DISTRICTS · ${medals}/36 MARKS`, 10, "#dfb778", true);
+    label(this, 26, 313, `12 NIGHTS · 8 DISTRICTS · ${medals}/36 MARKS`, 10, "#dfb778", true);
     label(this, 24, 395, "Make it home before dawn.", 24);
     label(
       this,
@@ -377,8 +346,8 @@ class MenuScene extends Phaser.Scene {
     ).setLineSpacing(6);
     const rows = [
       ["01", "RUN & JUMP", "← → / A D / Q D. Space to jump."],
-      ["02", "STUN → BITE", "E to stun. Get close. F to turn them."],
-      ["03", "SURVIVE & MASTER", "Extra challenges. Saved nights. Harder hunts."],
+      ["02", "GLAMOUR → BITE", "Hold E, face them, stay still. F to bite."],
+      ["03", "BUILD YOUR COVEN", "Dirt + healing. Three bites earn a shield."],
     ];
     rows.forEach(([num, title, copy], i) => {
       const y = 500 + i * 54;
@@ -424,7 +393,7 @@ class MenuScene extends Phaser.Scene {
     preferences.sound = !preferences.sound;
     Save.write("vampRunnerSettings", preferences);
     this.refreshSettings();
-    Sfx.play("blood");
+    if (preferences.sound) Sfx.play("key"); else Sfx.stop();
   }
   toggleMotion() {
     preferences.reducedMotion = !preferences.reducedMotion;
@@ -437,7 +406,7 @@ class MenuScene extends Phaser.Scene {
     Sfx.play("glamour");
     const checkpoint = resume ? this.checkpoint : null;
     if (!checkpoint) Save.write("vampRunnerCampaign", null);
-    this.scene.start("Game", { seed: Math.floor(Math.random() * 0xffffffff), ...checkpoint, profile: Save.progress() });
+    this.scene.start(checkpoint ? "Bat" : "Game", { seed: Math.floor(Math.random() * 0xffffffff), ...checkpoint, profile: Save.progress() });
   }
 }
 
@@ -447,13 +416,16 @@ class GameScene extends Phaser.Scene {
   create() {
     // Phaser reuses scene instances. Reset every piece of transient state.
     this.world = createWorld({ ...this.runData, profile: this.runData.profile ?? Save.progress() });
+    Sfx.setTheme(this.world.level.themeKey);
     this.paused = false;
     this.transitioning = false;
     this.pending = {};
     this.held = new Map();
+    this.glamourHeld = new Set();
     this.accumulator = 0;
     this.messageUntil = this.world.level.oneWay ? 5 : 3;
     this.pauseObjects = [];
+    this.warningUntil = 0;
     this.time.paused = false;
     this.tweens.resumeAll();
     this.cameras.main.setBounds(0, 0, this.world.level.width, GAME_H);
@@ -472,9 +444,10 @@ class GameScene extends Phaser.Scene {
       window.removeEventListener("blur", this.onBlur);
       document.removeEventListener("visibilitychange", this.onVisibility);
       this.resetInput();
+      Sfx.stop();
     });
     this.renderWorld();
-    this.message.setText(`${this.world.level.name}\nFind ${this.world.level.requiredKeys} blue crypt key${this.world.level.requiredKeys > 1 ? "s" : ""}.${this.world.level.oneWay ? "\nOne way: gates seal behind you." : ""}`);
+    this.message.setText(`${this.world.level.name}\n${Math.ceil(this.world.timeLeft)}s until sunrise · ${this.world.level.requiredKeys} crypt keys${this.world.level.theme.underground ? "\nOnly your sealed crypt stops the dawn curse." : this.world.level.oneWay ? "\nOne way: gates seal behind you." : ""}`);
     announce(`Night ${this.world.night}: ${this.world.level.name}. Find ${this.world.level.requiredKeys} crypt keys before sunrise.${this.world.level.oneWay ? " Gates seal behind you when you enter the next section." : ""}`);
   }
   fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
@@ -483,6 +456,7 @@ class GameScene extends Phaser.Scene {
     const theme = this.world.level.theme;
     sky.fillGradientStyle(0x101322, 0x101322, theme.sky, theme.sky, 1);
     sky.fillRect(0, 0, GAME_W, GAME_H);
+    if (theme.underground) { this.drawUnderground(theme); return; }
     for (let i = 0; i < 40; i++) {
       sky.fillStyle(C.cream, 0.25 + (i % 4) * 0.1);
       sky.fillRect((i * 83 + 17) % GAME_W, 170 + (i * 39) % 270, 1, 1);
@@ -517,6 +491,35 @@ class GameScene extends Phaser.Scene {
       }
     }
   }
+  drawUnderground(theme) {
+    const back = this.add.graphics().setScrollFactor(0.3).setDepth(-6);
+    for (let x = -60; x < this.world.level.width * 0.4 + 500; x += 170) {
+      back.fillStyle(theme.stone); back.fillRoundedRect(x, 205, 144, 440, 65);
+      back.fillStyle(theme.sky); back.fillRoundedRect(x + 15, 226, 114, 418, 53);
+      back.lineStyle(2, theme.trim, 0.2);
+      for (let y = 310; y < FLOOR; y += 42) back.lineBetween(x, y, x + 14, y);
+      if (theme.motif === "crypts") {
+        for (let y = 335; y < 570; y += 66) {
+          back.fillStyle(0x665f53); back.fillRoundedRect(x + 45, y, 48, 29, 10);
+          back.fillStyle(0xb9ab8a); back.fillCircle(x + 69, y + 11, 7);
+          back.fillStyle(0x15151c); back.fillCircle(x + 66, y + 10, 2); back.fillCircle(x + 72, y + 10, 2);
+        }
+      } else {
+        back.fillStyle(0x537371); back.fillRect(x + 32, 265, 80, 11);
+        back.fillRect(x + 102, 265, 10, 325);
+        back.lineStyle(3, 0x99a47c, 0.55); back.strokeCircle(x + 107, 400, 17);
+      }
+      back.fillStyle(0xe3bb73, 0.09); back.fillCircle(x + 18, 300, 38);
+      back.fillStyle(0xf0c57c, 0.85); back.fillRect(x + 14, 291, 8, 16);
+    }
+    const ceiling = this.fixed(this.add.graphics(), -5);
+    ceiling.fillStyle(0x0b1119); ceiling.fillRect(0, 144, GAME_W, 48);
+    for (let x = 0; x < GAME_W; x += 39) ceiling.fillTriangle(x, 187, x + 16, 211 + x % 17, x + 37, 187);
+    this.dawn = this.fixed(this.add.graphics(), -4);
+    this.dawn.fillStyle(0xeab774, 0.4);
+    this.dawn.fillTriangle(95, 197, 120, FLOOR, 171, FLOOR);
+    this.dawn.fillTriangle(310, 197, 252, FLOOR, 294, FLOOR);
+  }
   drawLevel() {
     const level = this.world.level, g = this.add.graphics().setDepth(1);
     for (const p of level.platforms) {
@@ -542,10 +545,18 @@ class GameScene extends Phaser.Scene {
             g.fillStyle(stripe % 2 ? 0xc7ac88 : 0xa24e67); g.fillRect(x, p.y, Math.min(22, p.x + p.w - x), 15);
           }
           g.fillStyle(0xe0c8a3); g.fillRect(p.x, p.y, p.w, 3);
-        } else if (p.skin === "stone") {
+        } else if (p.skin === "stone" || p.skin === "bone") {
           g.fillStyle(level.theme.stone); g.fillRect(p.x + p.w * 0.27, p.y + 13, p.w * 0.46, FLOOR - p.y - 13);
           g.fillStyle(0x56606b); g.fillRect(p.x, p.y, p.w, 16);
           g.fillStyle(level.theme.trim); g.fillRect(p.x, p.y, p.w, 4);
+          if (p.skin === "bone") {
+            g.fillStyle(0xc7b998, 0.75);
+            for (let x = p.x + 12; x < p.x + p.w - 6; x += 25) { g.fillCircle(x, p.y + 9, 3); g.fillRect(x - 2, p.y + 10, 4, 4); }
+          }
+        } else if (p.skin === "pipe") {
+          g.fillStyle(0x355d5e); g.fillRoundedRect(p.x, p.y, p.w, 18, 8);
+          g.fillStyle(0x94b4a5); g.fillRect(p.x + 4, p.y, p.w - 8, 4);
+          g.lineStyle(3, 0x748a7c); g.lineBetween(p.x + 12, p.y, p.x + 12, p.y + 18); g.lineBetween(p.x + p.w - 12, p.y, p.x + p.w - 12, p.y + 18);
         } else {
           g.fillStyle(p.skin === "pier" ? 0x527f86 : 0x847060); g.fillRect(p.x, p.y, p.w, 14);
           g.fillStyle(p.skin === "pier" ? 0xafd1cd : 0xd0b796); g.fillRect(p.x, p.y, p.w, 3);
@@ -591,6 +602,7 @@ class GameScene extends Phaser.Scene {
     this.pickupValues = level.pickups.map((p) => p.kind === "dirt" && p.value > 1 ? label(this, p.x, p.y - 26, `+${p.value}`, 11, "#f4d798", true).setOrigin(0.5).setDepth(6) : null);
     this.hazardSprites = level.hazards.map((h) => this.add.image(h.x, h.y, h.kind).setDepth(6).setDisplaySize(36, 40));
     this.humans = level.humans.map((h) => this.add.image(h.x, h.y + h.h, "npc_plain").setOrigin(0.5, 1).setDisplaySize(38, 42).setDepth(7));
+    this.priestLabels = level.humans.map(h => h.behavior === "priest" ? label(this, h.x, h.y - 50, "", 10, "#dfb778", true).setOrigin(0.5).setDepth(12) : null);
     this.dynamicGraphic = this.add.graphics().setDepth(3);
     this.gateGraphic = this.add.graphics().setDepth(8);
     this.gateLabels = level.gates.map((gate) => label(this, gate.x, 316, "", 12, "#dfb778", true).setOrigin(0.5).setDepth(9));
@@ -603,9 +615,10 @@ class GameScene extends Phaser.Scene {
   buildHUD() {
     this.fixed(this.add.rectangle(195, 72, 390, 144, C.ink, 0.97));
     this.fixed(label(this, 20, 19, `NIGHT ${String(this.world.night).padStart(2, "0")}${this.world.night <= 12 ? "/12" : " · BLOOD MOON"}`, 12, "#dfb778", true));
-    this.clock = this.fixed(label(this, 370, 18, "", 18, "#eee5d3", true).setOrigin(1, 0));
+    this.clock = this.fixed(label(this, 370, 18, "", 15, "#eee5d3", true).setOrigin(1, 0));
     this.fixed(this.add.rectangle(20, 54, 350, 4, C.line).setOrigin(0, 0.5));
     this.sunBar = this.fixed(this.add.rectangle(20, 54, 350, 4, C.gold).setOrigin(0, 0.5));
+    this.sunMarker = this.fixed(this.add.circle(20, 54, 6, C.gold));
     this.fixed(label(this, 20, 68, "COFFINS", 10, "#a9bac8", true));
     this.coffins = [0, 1, 2].map((i) => this.fixed(this.add.image(30 + i * 29, 101, "shelter").setDisplaySize(23, 28)));
     this.fixed(label(this, 129, 68, "GARLIC HITS", 10, "#a9bac8", true));
@@ -615,6 +628,7 @@ class GameScene extends Phaser.Scene {
     this.routeText = this.fixed(label(this, 20, 126, "", 11, "#a9bac8", true));
     this.keyText = this.fixed(label(this, 20, 157, "", 13, "#90d6f5", true));
     this.questText = this.fixed(label(this, 20, 184, "", 11, "#c4b28d", true));
+    this.covenText = this.fixed(label(this, 195, 656, "", 11, "#90d9bf", true).setOrigin(0.5));
     this.message = this.fixed(label(this, 195, 236, "", 15, "#eee5d3").setOrigin(0.5).setWordWrapWidth(350).setAlign("center"));
     const pause = this.fixed(this.add.rectangle(351, 174, 48, 48, C.ink, 0.9).setStrokeStyle(1, C.line).setInteractive());
     this.fixed(label(this, 351, 174, "Ⅱ", 21).setOrigin(0.5));
@@ -623,13 +637,12 @@ class GameScene extends Phaser.Scene {
     this.hint = this.fixed(label(this, 195, 687, "", 12, "#c4b28d", true).setOrigin(0.5));
   }
   buildControls() {
-    this.keys = this.input.keyboard.addKeys("LEFT,RIGHT,A,D,Q");
+    this.keys = this.input.keyboard.addKeys("LEFT,RIGHT,A,D,Q,E,J");
     onKey(this, "keydown", (e) => {
       if (e.repeat) return;
       if (["Escape", "KeyP"].includes(e.code)) { this.paused ? this.resumeGame() : this.pauseGame(); return; }
       if (this.paused || this.transitioning) return;
       if (["Space", "ArrowUp", "KeyW", "KeyZ"].includes(e.code)) { e.preventDefault?.(); this.pending.jump = true; }
-      if (["KeyE", "KeyJ"].includes(e.code)) this.pending.stun = true;
       if (["KeyF", "KeyK"].includes(e.code)) this.pending.bite = true;
     });
     this.input.keyboard.addCapture?.(["SPACE", "UP", "LEFT", "RIGHT"]);
@@ -644,33 +657,42 @@ class GameScene extends Phaser.Scene {
       });
       bg.on("pointerout", (pointer) => this.held.delete(pointer.id));
     }
-    const release = (pointer) => this.held.delete(pointer.id);
+    const release = (pointer) => { this.held.delete(pointer.id); this.glamourHeld.delete(pointer.id); };
     this.input.on("pointerup", release);
     this.input.on("pointerupoutside", release);
-    this.input.on("gameout", () => this.held.clear());
-    this.stunButton = button(this, 223, 737, 92, "STUN · E", () => { if (!this.paused) this.pending.stun = true; });
+    this.input.on("gameout", () => { this.held.clear(); this.glamourHeld.clear(); });
+    this.stunButton = button(this, 223, 737, 92, "GLAMOUR", () => {});
+    this.stunButton.bg.on("pointerdown", pointer => { if (!this.paused) { Sfx.unlock(); this.glamourHeld.add(pointer.id); } });
+    this.stunButton.bg.on("pointerout", pointer => this.glamourHeld.delete(pointer.id));
     this.biteButton = button(this, 329, 737, 92, "BITE · F", () => { if (!this.paused) this.pending.bite = true; });
     this.jumpButton = button(this, 276, 798, 198, "JUMP ↑", () => { if (!this.paused) this.pending.jump = true; }, true);
     for (const item of [this.stunButton, this.biteButton, this.jumpButton]) { this.fixed(item.bg); this.fixed(item.caption); }
     this.events.once("shutdown", () => this.input.removeAllListeners());
   }
-  resetInput() { this.held?.clear(); this.pending = {}; this.input.keyboard.resetKeys(); }
+  resetInput() { this.held?.clear(); this.glamourHeld?.clear(); this.pending = {}; this.input.keyboard.resetKeys(); if (this.world) interruptGlamour(this.world); }
   pauseGame() {
     if (this.paused || this.transitioning || this.world.status !== "playing") return;
     this.paused = true;
     this.resetInput();
+    Sfx.stop();
     const add = (o) => { this.pauseObjects.push(this.fixed(o, 90)); return o; };
     const dim = add(this.add.rectangle(195, 422, 390, 844, C.ink, 0.97).setInteractive());
     dim.on("pointerdown", (_p, _x, _y, e) => e?.stopPropagation());
     add(label(this, 195, 228, "THE NIGHT CAN WAIT.", 27).setOrigin(0.5));
     if (this.world.level.oneWay) add(label(this, 195, 416, "ONE WAY · GATES SEAL BEHIND YOU", 11, "#dfb778", true).setOrigin(0.5));
-    add(label(this, 195, 285, "Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nStun  E     ·     Bite  F\nPause  Escape / P", 16, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(14));
+    add(label(this, 195, 285, "Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nHold E: glamour · F: bite\nStay still. Face the human.", 15, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(14));
     const contracts = contractResults(this.world).map((c) => `${c.complete ? "✓" : "○"} ${c.title}: ${c.key === "untouched" ? c.value === 0 ? "on track" : "missed" : c.value + "/" + c.target} (+${c.reward} dirt)`);
     add(label(this, 195, 440, "OPTIONAL NIGHT CHALLENGES", 11, "#dfb778", true).setOrigin(0.5));
     add(label(this, 195, 477, contracts.join("\n"), 13, "#dfb778").setOrigin(0.5).setAlign("center").setLineSpacing(8));
     const resume = button(this, 195, 564, 330, "RESUME THE NIGHT", () => this.resumeGame(), true);
     const end = button(this, 195, 628, 330, "END RUN", () => this.finishRun("You returned to the shadows."));
     [resume.bg, resume.caption, end.bg, end.caption].forEach(add);
+    const sound = button(this, 195, 700, 210, `SOUND ${preferences.sound ? "ON" : "OFF"}`, () => {
+      preferences.sound = !preferences.sound; Save.write("vampRunnerSettings", preferences);
+      sound.caption.setText(`SOUND ${preferences.sound ? "ON" : "OFF"}`);
+      if (preferences.sound) Sfx.play("key"); else Sfx.stop();
+    });
+    [sound.bg, sound.caption].forEach(add);
     announce("Paused. Escape or Resume continues the night.");
   }
   resumeGame() {
@@ -712,12 +734,13 @@ class GameScene extends Phaser.Scene {
   }
   showEvents() {
     for (const event of this.world.events.splice(0)) {
-      if (event.kind === "jump") { Sfx.play("dash"); continue; }
-      if (event.text) { this.message.setText(event.text); this.messageUntil = this.world.elapsed + 2; }
-      if (event.kind === "dirt") this.saveProgress();
-      if (!["section", "locked", "gate-locked"].includes(event.kind)) Sfx.play(event.kind === "hurt" || event.kind === "dead" || event.kind === "gate-sealed" ? "hit" : event.kind === "safe" ? "safe" : "blood");
+      if (event.kind === "jump") { Sfx.play("jump"); continue; }
+      if (event.kind === "dawn-warning") this.warningUntil = this.world.elapsed + 3;
+      if (event.text && (event.kind === "dawn-warning" || this.world.elapsed >= this.warningUntil)) { this.message.setText(event.text); this.messageUntil = this.world.elapsed + (event.kind === "dawn-warning" ? 3 : 2); }
+      if (["dirt", "stun", "bite"].includes(event.kind)) this.saveProgress();
+      if (!["section", "locked", "gate-locked", "safe"].includes(event.kind)) Sfx.play(event.kind);
       if (event.kind === "hurt" && !preferences.reducedMotion) this.cameras.main.shake(110, 0.004);
-      if (["bite", "iv", "hurt", "key", "locked", "section", "gate-locked", "gate-sealed"].includes(event.kind)) announce(event.text);
+      if (["bite", "iv", "hurt", "key", "locked", "section", "gate-locked", "gate-sealed", "dawn-warning", "veil", "veil-blocked"].includes(event.kind)) announce(event.text);
     }
   }
   renderWorld() {
@@ -728,9 +751,11 @@ class GameScene extends Phaser.Scene {
     if (w.iv > 0) this.player.setTint(0xf6bbcd); else this.player.clearTint();
     this.cameras.main.scrollX = Math.max(0, Math.min(w.level.width - GAME_W, p.x - 125));
     this.cameras.main.scrollY = 0;
-    this.dawn.setAlpha(Math.max(0, 1 - w.timeLeft / 32) * 0.6);
-    this.clock.setText(`${Math.ceil(w.timeLeft)}s TO DAWN`).setColor(w.timeLeft <= 15 ? "#ffb777" : "#eee5d3");
+    const dawn = dawnState(w), seconds = Math.ceil(w.timeLeft);
+    this.dawn.setAlpha(dawn.glow * 0.7);
+    this.clock.setText(`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} TO SUNRISE`).setColor(dawn.final ? "#ff8295" : dawn.urgent ? "#ffb777" : "#eee5d3");
     this.sunBar.setScale(Math.max(0, w.timeLeft / w.level.duration), 1);
+    this.sunMarker.setPosition(20 + dawn.fraction * 350, 54);
     this.coffins.forEach((o, i) => o.setAlpha(i < w.lives ? 1 : 0.18));
     this.garlic.forEach((o, i) => o.setFillStyle(i < w.garlicHits ? C.red : C.line));
     this.wallet.setText(`${w.profile.dirt} GRAVE DIRT`);
@@ -739,6 +764,7 @@ class GameScene extends Phaser.Scene {
     const nextKey = w.level.pickups.filter((item) => item.kind === "key" && item.active).sort((a, b) => Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
     this.keyText.setText(nextKey ? `KEYS ${w.keys}/${w.level.requiredKeys} · ${nextKey.x < p.x ? "←" : "→"} ${Math.ceil(Math.abs(nextKey.x - p.x) / 10)}m${nextKey.y < p.y - 30 ? " ↑" : ""}` : `CRYPT OPEN · → ${Math.max(0, Math.ceil((w.level.crypt.x - p.x) / 10))}m`);
     this.questText.setText(`TURN ${w.stats.turned}/${w.level.contracts[0].target} · DIRT ${w.stats.dirt}/${w.level.contracts[1].target}`);
+    this.covenText.setText(`${w.stats.turned} TURNED · ${w.veil ? "SHADOW VEIL READY" : `${w.feeds}/3 BITES → SHADOW VEIL`}`);
     this.cryptDoor.setAlpha(nextKey ? 0.45 : 1);
     this.message.setAlpha(w.elapsed < this.messageUntil ? 1 : 0);
     w.level.pickups.forEach((pickup, i) => {
@@ -748,6 +774,11 @@ class GameScene extends Phaser.Scene {
       this.pickupValues[i]?.setVisible(pickup.active).setPosition(pickup.x, pickup.y - 26);
     });
     this.targetGraphic.clear();
+    if (w.veil) { this.targetGraphic.lineStyle(2, C.mint, 0.7); this.targetGraphic.strokeEllipse(p.x, p.y + p.h / 2, 44, 60); }
+    if (w.focus) {
+      this.targetGraphic.fillStyle(C.ink, 0.9); this.targetGraphic.fillRect(p.x - 27, p.y - 18, 54, 6);
+      this.targetGraphic.fillStyle(C.mint); this.targetGraphic.fillRect(p.x - 27, p.y - 18, 54 * w.focus.elapsed / w.focus.duration, 6);
+    }
     this.renderEncounters();
     w.level.humans.forEach((h, i) => {
       const sprite = this.humans[i];
@@ -761,17 +792,22 @@ class GameScene extends Phaser.Scene {
       }
       if (h.state === "human" && h.behavior === "priest") {
         const phase = pulseState(w.elapsed, 3.8, h.phase);
+        const crossX = h.x + h.direction * 23, crossY = h.y + (phase === "safe" ? 9 : -19);
+        this.targetGraphic.fillStyle(phase === "active" ? 0xffe7a6 : C.gold);
+        this.targetGraphic.fillRect(crossX - 3, crossY, 6, 30); this.targetGraphic.fillRect(crossX - 12, crossY + 7, 24, 6);
         this.targetGraphic.lineStyle(2, C.gold, phase === "safe" ? 0.16 : 0.9);
         this.targetGraphic.strokeEllipse(h.x, h.y + 8, 100, 75);
         if (phase === "active") { this.targetGraphic.fillStyle(C.gold, 0.28); this.targetGraphic.fillEllipse(h.x, h.y + 8, 100, 75); }
+        this.priestLabels[i].setText(phase === "safe" ? "CROSS LOWERED" : phase === "warning" ? "RAISING CROSS" : "CROSS RAISED").setPosition(h.x, h.y - 48);
       }
+      this.priestLabels[i]?.setVisible(h.state === "human");
     });
-    const nearby = targetHuman(w), biteTarget = targetHuman(w, 52, true);
+    const nearby = targetHuman(w), biteTarget = targetHuman(w, 30, true);
     const section = sectionAt(w.level, p.x);
     const nextGate = w.level.gates.find((gate) => gate.x > p.x && gate.x - p.x < 210);
     const gateHint = nextGate ? gateState(w, nextGate) === "locked" ? "KEY FIRST · THE GATE IS LOCKED" : "NO RETURN · CROSS TO SEAL THIS SECTION" : null;
-    this.hint.setText(biteTarget ? `BITE NOW · ${biteTarget.stunned.toFixed(1)}s` : nearby?.state === "stunned" ? "GET CLOSER TO BITE" : nearby ? "STUN → BITE · SILENCE THE THREAT" : gateHint || section.hint);
-    this.stunButton.bg.setAlpha(nearby && nearby.state !== "stunned" && w.stunCooldown === 0 ? 1 : 0.5);
+    this.hint.setText(w.focus ? "HOLD GLAMOUR · DON'T MOVE" : biteTarget ? `BITE NOW · ${biteTarget.stunned.toFixed(1)}s` : nearby?.state === "stunned" ? "GET CLOSER · BITE BEFORE THEY WAKE" : nearby?.behavior === "priest" && pulseState(w.elapsed, 3.8, nearby.phase) !== "safe" ? "CROSS RAISED · GLAMOUR BLOCKED" : nearby ? "FACE THEM · HOLD GLAMOUR · +2 DIRT" : gateHint || section.hint);
+    this.stunButton.bg.setAlpha(canGlamour(w, nearby) && w.stunCooldown === 0 ? 1 : 0.5);
     this.biteButton.bg.setAlpha(biteTarget ? 1 : 0.5);
     this.moveButtons.forEach(({ bg, direction }) => bg.setFillStyle([...this.held.values()].includes(direction) ? 0x384756 : C.panel));
   }
@@ -815,6 +851,16 @@ class GameScene extends Phaser.Scene {
     w.level.hazards.forEach((h, i) => {
       if (!h.pulse) return;
       const phase = pulseState(w.elapsed, h.period, h.phase);
+      if (h.visual === "vent") {
+        this.hazardSprites[i].setVisible(false);
+        g.fillStyle(0x69867b); g.fillRect(h.x - 24, FLOOR - 7, 48, 7);
+        g.lineStyle(2, C.ink); for (let x = h.x - 19; x < h.x + 24; x += 8) g.lineBetween(x, FLOOR - 7, x, FLOOR);
+        if (phase !== "safe") {
+          g.fillStyle(0xb5cd87, phase === "active" ? 0.6 : 0.15);
+          for (let j = 0; j < 4; j++) g.fillEllipse(h.x + (j % 2 ? 5 : -5), FLOOR - 17 - j * 21, 36 + j * 3, 24);
+        }
+        return;
+      }
       this.hazardSprites[i].setAlpha(phase === "safe" ? 0.18 : phase === "warning" ? 0.65 : 1);
       if (phase !== "safe") {
         this.targetGraphic.lineStyle(1, C.gold, 0.8); this.targetGraphic.strokeRect(h.x - h.w / 2, h.y - h.h / 2, h.w, h.h);
@@ -830,14 +876,160 @@ class GameScene extends Phaser.Scene {
     if (this.paused || this.transitioning) return;
     const key = (name) => this.keys[name]?.isDown;
     const move = Math.max(-1, Math.min(1, (key("RIGHT") || key("D") ? 1 : 0) - (key("LEFT") || key("A") || key("Q") ? 1 : 0) + [...this.held.values()].reduce((a, b) => a + b, 0)));
-    this.accumulator += Math.min(delta / 1000, 0.05);
+    const frameSeconds = Math.max(0, delta / 1000);
+    // Physics work is capped during a slow frame; the sunrise deadline is not.
+    advanceClock(this.world, Math.max(0, frameSeconds - 0.05));
+    this.accumulator += Math.min(frameSeconds, 0.05);
     while (this.accumulator >= STEP) {
-      step(this.world, { move, ...this.pending }, STEP);
+      step(this.world, { move, stun: key("E") || key("J") || this.glamourHeld.size > 0, ...this.pending }, STEP);
       this.pending = {}; this.accumulator -= STEP;
     }
+    if (this.world.status === "playing") Sfx.tick(this.world.level.duration - this.world.timeLeft, this.world.timeLeft);
     this.showEvents(); this.renderWorld();
     if (this.world.status === "safe") this.completeNight();
     else if (this.world.status === "dead") this.showSunrise();
+  }
+}
+
+class BatScene extends Phaser.Scene {
+  constructor() { super("Bat"); }
+  init(data = {}) { this.runData = data; }
+  fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
+  create() {
+    this.flight = VampBat.createFlight(this.runData);
+    this.paused = false; this.transitioning = false; this.accumulator = 0;
+    this.held = new Set(); this.pauseObjects = []; this.windowShown = false;
+    Sfx.setTheme("roofs");
+    this.cameras.main.setBounds(0, 0, this.flight.width + 100, GAME_H); this.cameras.main.setScroll(0, 0);
+    const sky = this.fixed(this.add.graphics(), -10);
+    sky.fillGradientStyle(0x111524, 0x111524, 0x423b57, 0x423b57, 1); sky.fillRect(0, 0, GAME_W, GAME_H);
+    sky.fillStyle(0xe1d6b8); sky.fillCircle(286, 280, 32);
+    for (let i = 0; i < 30; i++) { sky.fillStyle(C.cream, 0.4); sky.fillRect((i*83)%390, 205+(i*47)%330, 1, 1); }
+    this.dawn = this.fixed(this.add.rectangle(195, 422, 390, 844, 0xf5a568, 0), -8);
+    this.scenery = this.add.graphics().setDepth(1); this.batGraphic = this.add.graphics().setDepth(8);
+    const f = this.flight;
+    this.resident = this.add.image(f.window.x + 28, f.window.y + 18, "npc_plain").setDisplaySize(37, 44).setDepth(4);
+    this.fixed(this.add.rectangle(195, 93, 390, 186, C.ink, 0.96));
+    this.fixed(label(this, 20, 21, `NIGHT ${f.night} · BAT FLIGHT`, 12, "#dfb778", true));
+    this.clock = this.fixed(label(this, 20, 53, "", 18, "#eee5d3", true));
+    this.statusText = this.fixed(label(this, 20, 89, "", 11, "#90d9bf", true));
+    this.phaseText = this.fixed(label(this, 195, 132, "Reach the open window.", 20).setOrigin(0.5));
+    this.note = this.fixed(label(this, 195, 166, "Hold to rise. Release to descend.", 12, "#acbdc9").setOrigin(0.5));
+    this.concern = this.fixed(label(this, 195, 240, "", 17).setOrigin(0.5).setWordWrapWidth(345).setAlign("center"));
+    this.feedback = this.fixed(label(this, 195, 510, "", 13, "#dfb778").setOrigin(0.5).setWordWrapWidth(340).setAlign("center"));
+    this.focusBar = this.fixed(this.add.rectangle(45, 565, 300, 5, C.mint).setOrigin(0, 0.5));
+    this.focusBar.setVisible(false);
+    this.fixed(this.add.rectangle(195, 738, 390, 212, C.ink, 0.97));
+    this.flap = button(this, 195, 715, 330, "HOLD TO FLAP · SPACE", () => Sfx.unlock(), true);
+    this.flap.bg.on("pointerdown", p => { if (!this.paused) this.held.add(p.id); });
+    this.flap.bg.on("pointerout", p => this.held.delete(p.id));
+    this.glamour = button(this, 195, 615, 330, "HOLD GLAMOUR · E", () => Sfx.unlock(), true);
+    this.glamour.bg.on("pointerdown", p => { if (!this.paused) this.held.add(p.id); });
+    this.glamour.bg.on("pointerout", p => this.held.delete(p.id));
+    this.glamour.bg.setVisible(false).disableInteractive(); this.glamour.caption.setVisible(false);
+    this.choices = f.resident.choices.map((choice, index) => button(this, 195, 680 + index * 59, 350, `${index + 1}. ${choice[1]}`, () => this.choose(index)));
+    this.choices.forEach(b => { b.bg.setVisible(false).disableInteractive(); b.caption.setVisible(false).setWordWrapWidth(325); });
+    const pause = button(this, 344, 57, 52, "Ⅱ", () => this.paused ? this.resumeGame() : this.pauseGame());
+    [pause.bg, pause.caption].forEach(o => this.fixed(o, 95));
+    this.keys = this.input.keyboard.addKeys("SPACE,UP,W,Z,E,J");
+    onKey(this, "keydown", e => {
+      if (["Space", "ArrowUp", "KeyW", "KeyZ"].includes(e.code)) e.preventDefault?.();
+      if (e.repeat) return;
+      if (["Escape", "KeyP"].includes(e.code)) { this.paused ? this.resumeGame() : this.pauseGame(); return; }
+      if (/^Digit[123]$/.test(e.code)) this.choose(Number(e.code.slice(-1)) - 1);
+    });
+    this.input.keyboard.addCapture?.(["SPACE", "UP"]);
+    const release = p => this.held.delete(p.id);
+    this.input.on("pointerup", release); this.input.on("pointerupoutside", release); this.input.on("gameout", () => this.held.clear());
+    this.onBlur = () => this.pauseGame(); this.onVisibility = () => { if (document.hidden) this.pauseGame(); };
+    window.addEventListener("blur", this.onBlur); document.addEventListener("visibilitychange", this.onVisibility);
+    this.events.once("shutdown", () => {
+      window.removeEventListener("blur", this.onBlur); document.removeEventListener("visibilitychange", this.onVisibility);
+      this.input.removeAllListeners(); this.held.clear(); this.input.keyboard.resetKeys(); Sfx.stop();
+    });
+    this.renderFlight();
+    announce(`Night ${f.night}. You are a bat. Hold Space or Flap to rise, release to descend. Reach the window and earn an invitation.`);
+  }
+  choose(index) { if (!this.paused && !this.transitioning) VampBat.choose(this.flight, index); }
+  pauseGame() {
+    if (this.paused || this.transitioning) return;
+    this.paused = true; this.held.clear(); this.input.keyboard.resetKeys(); this.flight.focus = 0; Sfx.stop();
+    const dim = this.fixed(this.add.rectangle(195, 422, 390, 844, C.ink, 0.97).setInteractive(), 90);
+    const title = this.fixed(label(this, 195, 360, "THE SKY CAN WAIT.", 25).setOrigin(0.5), 91);
+    const resume = button(this, 195, 450, 330, "RESUME FLIGHT", () => this.resumeGame(), true);
+    this.pauseObjects = [dim, title, this.fixed(resume.bg, 91), this.fixed(resume.caption, 91)];
+    announce("Flight paused. The sunrise clock is paused too.");
+  }
+  resumeGame() {
+    if (!this.paused || this.transitioning) return;
+    this.pauseObjects.forEach(o => o.destroy()); this.pauseObjects = [];
+    this.held.clear(); this.input.keyboard.resetKeys(); this.accumulator = 0; this.paused = false;
+  }
+  renderFlight() {
+    const f = this.flight, b = f.bat, g = this.scenery;
+    this.cameras.main.scrollX = Math.max(0, Math.min(f.width - 310, b.x - 125));
+    this.cameras.main.scrollY = 0;
+    g.clear();
+    g.fillStyle(0x141d2b); g.fillRect(0, 635, f.width + 250, 50);
+    f.obstacles.forEach(o => {
+      const upper = o.center - o.gap / 2, lower = o.center + o.gap / 2;
+      g.fillStyle(0x2a3043); g.fillRect(o.x, 210, o.w, upper - 210); g.fillRect(o.x, lower, o.w, 640 - lower);
+      g.fillStyle(0xab939b); g.fillRect(o.x - 5, upper - 6, o.w + 10, 6); g.fillRect(o.x - 5, lower, o.w + 10, 6);
+      g.lineStyle(2, 0x655e77); g.lineBetween(o.x + 14, 220, o.x + 14, upper - 10);
+    });
+    const win = f.window;
+    g.fillStyle(0x2f3448); g.fillRect(win.x + 6, win.y - 90, 170, 660 - win.y);
+    g.fillStyle(0xecd19a, 0.16); g.fillCircle(win.x + 25, win.y, 60);
+    g.fillStyle(0xc59d69); g.fillRoundedRect(win.x, win.y - 42, 66, 90, 21);
+    g.fillStyle(0x34273a); g.fillRoundedRect(win.x + 7, win.y - 34, 52, 76, 17);
+    g.fillStyle(0xe1c79a); g.fillRect(win.x - 6, win.y + 46, 78, 6);
+    const bat = this.batGraphic; bat.clear(); bat.fillStyle(0x211a30);
+    const wing = preferences.reducedMotion ? 8 : Math.sin(f.elapsed * 17) * 13;
+    bat.fillTriangle(b.x - 3, b.y, b.x - 29, b.y - wing, b.x - 15, b.y + 10);
+    bat.fillTriangle(b.x + 3, b.y, b.x + 29, b.y - wing, b.x + 15, b.y + 10);
+    bat.fillEllipse(b.x, b.y, 15, 21); bat.fillTriangle(b.x - 7, b.y - 5, b.x - 6, b.y - 15, b.x, b.y - 7);
+    bat.fillStyle(0xf486a0); bat.fillCircle(b.x + 3, b.y - 4, 2);
+    const seconds = Math.ceil(f.timeLeft);
+    this.clock.setText(`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} TO SUNRISE`);
+    this.statusText.setText(`${f.lives} COFFINS · ${f.profile.dirt} DIRT · SAME NIGHT CLOCK`);
+    this.dawn.setAlpha(Math.max(0, 1 - f.timeLeft / f.level.duration - 0.35) * 0.8);
+    if (f.status === "window") {
+      if (!this.windowShown) {
+        this.windowShown = true; this.held.clear();
+        this.flap.bg.setVisible(false).disableInteractive(); this.flap.caption.setVisible(false);
+        this.glamour.bg.setVisible(true).setInteractive(); this.glamour.caption.setVisible(true);
+        this.choices.forEach(b => { b.bg.setVisible(true).setInteractive(); b.caption.setVisible(true); });
+        this.focusBar.setVisible(true);
+      }
+      this.phaseText.setText(f.resident.name);
+      this.concern.setText(`“${f.resident.concern}”`);
+      this.note.setText(f.invitationLeft > 0 ? `CHOOSE YOUR PROMISE · ${f.invitationLeft.toFixed(1)}s` : VampBat.calm(f) ? "CALM · HOLD GLAMOUR" : "SUSPICIOUS · WAIT FOR THEIR GAZE TO SOFTEN");
+      this.focusBar.setScale(f.invitationLeft > 0 ? f.invitationLeft / 4 : f.focus / 1.1, 1);
+      this.choices.forEach(b => b.bg.setAlpha(f.invitationLeft > 0 ? 1 : 0.4));
+    }
+  }
+  update(_time, delta) {
+    if (this.paused || this.transitioning) return;
+    const f = this.flight, seconds = Math.max(0, delta / 1000), key = k => this.keys[k]?.isDown;
+    VampBat.advance(f, Math.max(0, seconds - 0.05)); this.accumulator += Math.min(seconds, 0.05);
+    while (this.accumulator >= STEP) {
+      VampBat.step(f, { flap: key("SPACE") || key("UP") || key("W") || key("Z") || this.held.size > 0, glamour: key("E") || key("J") || this.held.size > 0 }, STEP);
+      this.accumulator -= STEP;
+    }
+    for (const event of f.events.splice(0)) { Sfx.play(event.kind); if (event.text) { announce(event.text); this.feedback.setText(event.text); } }
+    this.renderFlight(); Sfx.tick(f.level.duration - f.timeLeft, f.timeLeft);
+    if (f.status === "invited" || f.status === "dead") {
+      this.transitioning = true; this.held.clear(); Sfx.stop(); Sfx.play(f.status === "invited" ? "safe" : "dead");
+      Save.write("vampRunnerProgress", f.profile);
+      if (f.status === "dead") {
+        Save.write("vampRunnerCampaign", null);
+        this.scene.start("Score", { score: f.score, nights: f.night - 1, reason: f.reason, profile: f.profile });
+      } else {
+        this.concern.setText("Come in, little one.\n+5 dirt · +200 points");
+        if (!preferences.reducedMotion) this.tweens.add({ targets: this.batGraphic, x: 70, alpha: 0, duration: 650 });
+        this.time.delayedCall(700, () => this.scene.start("Game", { ...this.runData, profile: f.profile, lives: f.lives, score: f.score, timeLeft: f.timeLeft }));
+      }
+    }
   }
 }
 
@@ -850,6 +1042,7 @@ class CryptScene extends Phaser.Scene {
     this.storageOK = true;
   }
   create() {
+    Sfx.play("safe");
     this.cameras.main.setScroll(0, 0);
     vignette(this);
     label(this, 24, 31, this.run.nightNumber % 12 === 0 ? "CAMPAIGN COMPLETE · BLOOD MOON UNLOCKED" : "SAFE UNTIL THE NEXT SUNSET", 10, "#90d9bf", true);
@@ -913,7 +1106,7 @@ class CryptScene extends Phaser.Scene {
   nextNight() {
     if (this.transitioning) return;
     this.transitioning = true;
-    this.scene.start("Game", { nightNumber: this.run.nightNumber + 1, score: this.run.score, lives: this.run.lives, seed: this.run.seed ?? 1, profile: this.run.profile });
+    this.scene.start("Bat", { nightNumber: this.run.nightNumber + 1, score: this.run.score, lives: this.run.lives, seed: this.run.seed ?? 1, profile: this.run.profile });
   }
   returnToMenu() {
     if (this.transitioning) return;
@@ -1143,7 +1336,7 @@ const config = {
   parent: "game",
   input: { activePointers: 3, keyboard: true },
   render: { antialias: true, roundPixels: true },
-  scene: [BootScene, MenuScene, GameScene, CryptScene, ScoreScene],
+  scene: [BootScene, MenuScene, GameScene, BatScene, CryptScene, ScoreScene],
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
 };
 if (typeof module !== "undefined" && module.exports)
@@ -1151,6 +1344,7 @@ if (typeof module !== "undefined" && module.exports)
     BootScene,
     MenuScene,
     GameScene,
+    BatScene,
     CryptScene,
     ScoreScene,
     Save,

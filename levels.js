@@ -9,6 +9,8 @@
     canals: { name: "Drowned Canals", sky: 0x203b4f, stone: 0x243d49, trim: 0x8bb9c3, motif: "water" },
     market: { name: "Blood Market", sky: 0x50333c, stone: 0x41313a, trim: 0xd5a680, motif: "awnings" },
     cathedral: { name: "Cathedral Ward", sky: 0x443450, stone: 0x323344, trim: 0xc4b18b, motif: "spires" },
+    catacombs: { name: "The Catacombs", sky: 0x171a24, stone: 0x34323c, trim: 0xd0bc8f, motif: "crypts", underground: true },
+    sewers: { name: "The Undercity", sky: 0x11252b, stone: 0x263d3f, trim: 0x8bc2ac, motif: "tunnels", underground: true },
   };
   const ferry = (x, y, w, range, period) => [x, y, w, { motion: { axis: "x", range, period, phase: -Math.PI / 2 } }];
   const lift = (x, y, w, range, period) => [x, y, w, { motion: { axis: "y", range, period, phase: Math.PI / 2 } }];
@@ -58,6 +60,24 @@
     nave: { name: "THE EMPTY NAVE", width: 1430, skin: "stone", decks: [[215,565,240],[520,485,310],[905,555,230],[1220,590,65]], gaps: [[390,865]], key: 1, rewards: [[[0,5,1],[2,1,5]],[[1,1,8],[3,2,1]]], power: [1], heals: [2], priest: true },
     reliquary: { name: "THE RELIQUARY", width: 1290, skin: "stone", decks: [[220,555,150],[430,465,130],[640,415,140],[850,495,160],[1090,570,80],bonus(645,345,120)], gaps: [[325,800]], key: 2, detour: [0,1,2,5,2,3,4], rewards: [[[1,2,1],[5,1,9]],[[3,3,1],[5,1,8]]], power: [5], heals: [4], priest: true },
     ossuary: { name: "THE OSSUARY", width: 1470, skin: "stone", decks: [cracked(220,580,100),[410,540,180],cracked(670,470,130),[920,545,180],[1230,580,60]], gaps: [[275,990]], key: 2, rewards: [[[1,4,1],[3,1,6]],[[0,1,4],[2,1,6]]], power: [3], heals: [4], crosses: [1330], priest: true },
+
+    descent: { name: "THE BURIED STAIR", width: 1230, skin: "bone", decks: [[220,545,145],[425,460,150],[650,390,170],[895,480,125],[1060,570,70]], gaps: [[325,760]], key: 2, rewards: [[[0,3,1],[2,1,8]],[[1,1,6],[3,3,1]]], power: [2], heals: [4] },
+    niches: { name: "ROWS OF THE DEAD", width: 1310, skin: "bone", decks: [[215,575,90],[375,510,100],[540,440,145],[755,525,95],[970,570,140]], gaps: [[265,760]], key: 2, rewards: [[[1,1,5],[4,4,1]],[[0,2,1],[2,1,8]]], power: [2], heals: [4] },
+    vault: { name: "THE SUNKEN VAULT", width: 1380, skin: "bone", decks: [[210,560,250],[555,580,110],[760,515,240],[1100,575,90]], gaps: [[395,775]], key: 2, rewards: [[[0,4,1],[2,1,7]],[[1,1,6],[3,3,1]]], power: [2], heals: [0] },
+    bonebridge: { name: "BONE BRIDGE", width: 1400, skin: "bone", decks: [[205,570,120],cracked(390,515,115),cracked(570,470,130),cracked(765,525,110),[940,555,140],[1170,585,70]], gaps: [[285,920]], key: 2, rewards: [[[1,1,4],[4,1,7]],[[0,3,1],[3,1,7]]], power: [4], heals: [5] },
+    buriallift: { name: "THE BURIAL HOIST", width: 1460, skin: "bone", decks: [[210,560,160],[435,480,150],lift(660,465,140,40,4.8),[905,410,160],[1140,510,150]], gaps: [[335,925]], key: 2, rewards: [[[1,4,1],[3,1,8]],[[0,3,1],[2,1,7]]], power: [3], heals: [4] },
+    urns: { name: "THE URN GALLERY", width: 1220, skin: "bone", decks: [[220,570,80],[355,485,90],[510,420,100],[675,490,95],[845,565,140]], gaps: [[270,635]], key: 2, rewards: [[[0,1,3],[3,1,7]],[[1,1,5],[4,1,6]]], power: [2], heals: [4], priest: true },
+    tombcache: { name: "THE FORGOTTEN OFFERING", width: 1440, skin: "bone", decks: [[220,560,160],[450,490,290],[830,540,180],[1130,585,105],bonus(530,395,125)], gaps: [[335,855]], key: 1, detour: [0,1,4,1,2,3], rewards: [[[0,3,1],[4,1,9]],[[2,3,1],[4,2,5]]], power: [4], heals: [3] },
+    vigil: { name: "THE LAST VIGIL", width: 1350, skin: "bone", decks: [[210,545,270],[550,455,150],[765,535,220],[1100,585,75]], gaps: [[420,715]], key: 1, rewards: [[[0,4,1],[2,1,7]],[[1,1,8],[3,2,1]]], power: [1], heals: [2], crosses: [1200] },
+
+    sluice: { name: "THE LOWER SLUICE", width: 1240, skin: "pipe", decks: [[215,580,155],[440,540,165],[700,585,100],[905,545,125]], gaps: [[320,650]], key: 1, rewards: [[[0,4,1],[3,1,7]],[[1,1,7],[2,3,1]]], power: [1], heals: [3], water: true, vents: [1090] },
+    conduit: { name: "PIPE ORGAN", width: 1350, skin: "pipe", decks: [[220,555,145],[435,475,135],[635,405,180],[885,490,150],[1120,575,80]], gaps: [[325,820]], key: 2, rewards: [[[1,3,1],[2,1,8]],[[0,4,1],[3,1,7]]], power: [2], heals: [4], water: true },
+    sump: { name: "SUMP FERRY", width: 1320, skin: "pipe", decks: [[210,575,190],ferry(595,585,125,100,5.3),[855,540,170],[1130,585,70]], gaps: [[345,850]], key: 1, rewards: [[[0,4,1],[2,1,7]],[[1,1,7],[3,3,1]]], power: [2], heals: [3], water: true },
+    piston: { name: "PUMP-ROOM PISTON", width: 1440, skin: "pipe", decks: [[215,570,135],lift(470,540,145,40,4.4),[715,490,185],[995,570,180]], gaps: [[310,790]], key: 1, rewards: [[[0,4,1],[2,1,8]],[[1,1,8],[3,3,1]]], power: [2], heals: [3], water: true, vents: [1250] },
+    drains: { name: "BROKEN DRAINS", width: 1390, skin: "pipe", decks: [[210,575,125],cracked(410,550,110),[650,490,160],cracked(890,555,115),[1140,580,90]], gaps: [[290,880]], key: 2, rewards: [[[1,1,4],[4,1,7]],[[0,3,1],[2,1,8]]], power: [2], heals: [4], water: true },
+    cistern: { name: "THE DEEP CISTERN", width: 1550, skin: "pipe", decks: [[220,580,100],ferry(490,580,120,75,5.2),[740,525,150],ferry(1085,570,120,80,5.6),[1340,580,65]], gaps: [[280,1100]], key: 3, rewards: [[[1,1,6],[2,3,1]],[[2,1,7],[3,3,1]]], power: [2], heals: [4], water: true },
+    smugglers: { name: "SMUGGLERS' POCKET", width: 1450, skin: "pipe", decks: [[210,570,160],[435,510,310],[840,560,185],[1165,585,95],bonus(525,415,140)], gaps: [[315,900]], key: 1, detour: [0,1,4,1,2,3], rewards: [[[0,4,1],[4,1,9]],[[2,3,1],[4,2,5]]], power: [4], heals: [3], water: true, hunter: true },
+    outfall: { name: "THE SEALED OUTFALL", width: 1330, skin: "pipe", decks: [[210,575,220],[510,520,160],[765,560,210],[1120,585,65]], gaps: [[365,790]], key: 1, rewards: [[[0,4,1],[2,1,7]],[[1,1,8],[3,3,1]]], power: [1], heals: [2], water: true, vents: [1180] },
   };
   const CAMPAIGN = [
     { name: "First Blood", theme: "quarter", seconds: 112, keys: 1, sections: ["lanterns","balconies","sunken","carriage","wells","sidecourt"] },
@@ -68,8 +88,8 @@
     { name: "The Bells Toll", theme: "cathedral", seconds: 162, keys: 2, sections: ["cloister","pillars","belllift","nave","reliquary","ossuary","chimneys","cargo"] },
     { name: "Graveyard Shift", theme: "quarter", seconds: 148, keys: 3, sections: ["wells","sidecourt","lanterns","carriage","backalleys","brokenroots","valley","cloister"] },
     { name: "Gutter Crown", theme: "roofs", seconds: 162, keys: 3, sections: ["chimneys","spires","attics","scaffolds","valley","moonferry","belllift","bunting"] },
-    { name: "The Forgotten", theme: "gardens", seconds: 170, keys: 3, sections: ["gravestones","roots","boughs","overgrowth","brokenroots","gardenwell","ossuary","warehouse","spillway"] },
-    { name: "Undertow", theme: "canals", seconds: 185, keys: 3, sections: ["crossing","doubleferry","locklift","moonferry","cargo","spillway","arcade","gardenwell","scaffolds"] },
+    { name: "The Forgotten", theme: "catacombs", seconds: 154, keys: 3, sections: ["descent","niches","vault","bonebridge","buriallift","urns","tombcache","vigil"] },
+    { name: "Undertow", theme: "sewers", seconds: 168, keys: 3, sections: ["sluice","conduit","sump","piston","drains","cistern","smugglers","outfall"] },
     { name: "The Procession", theme: "cathedral", seconds: 176, keys: 3, sections: ["pillars","cloister","belllift","nave","reliquary","ossuary","attics","marketstair","boughs"] },
     { name: "The Longest Night", theme: "cathedral", seconds: 190, keys: 3, sections: ["chimneys","doubleferry","gravestones","bunting","cargo","reliquary","scaffolds","brokenroots","pillars","nave"] },
   ];
@@ -77,6 +97,7 @@
     brick: "Read the roofline. Every landing is different.", beam: "Mind the gaps between the beams.",
     branch: "Follow the branches. Watch the low landings.", stone: "Short ledges. Line up your next jump.",
     awning: "Take the canopies. Hunt for high caches.", pier: "Ride the platforms. Wait for your landing.",
+    bone: "Follow the tomb ledges. The crypt is your only refuge.", pipe: "Stay above the drains. Time the next crossing.",
   };
   function random(seed) {
     let state = (seed >>> 0) || 1;
@@ -120,6 +141,7 @@
       if (e.decks.some(d => d[3]?.crumble)) section.hint = "Cracked ledges collapse. Keep moving.";
       if (e.decks.some(d => d[3]?.motion?.axis === "y")) section.hint = "Ride the lift. Jump when the heights line up.";
       if (e.detour) section.hint = "High caches reward an extra climb.";
+      if (e.vents) section.hint = "Garlic vents pulse. Cross when the fumes clear.";
       sections.push(section); checkpoints.push(start + 80);
       const decks = e.decks.map(([x,y,w,extra = {}]) => platform(xPoint(mirrored ? x + w : x), y, w, { skin: e.skin, section: index, ...extra, ...(extra.motion ? { motion: { ...extra.motion, phase: extra.motion.axis === "x" && mirrored ? Math.PI / 2 : extra.motion.phase } } : {}) }));
       let order = decks.map((p,i) => i).filter(i => !decks[i].bonus);
@@ -142,8 +164,9 @@
       person(start + 140, ["wander", "flee", "brave"][index % 3]);
       if (e.hunter || ((settings.chapter >= 6 || settings.cycle) && index % 3 === 2 && !e.priest)) person(end - 115, "hunter");
       // Leave a clear landing before the priest's aura so ground combat is a choice.
-      if (e.priest) person(end - 65, "priest", 15);
+      if (e.priest || (settings.chapter === 2 && index === types.length - 1)) person(end - 65, "priest", 15);
       for (const x of e.crosses || []) hazards.push({ kind: "cross", x: xPoint(x), y: FLOOR - 57, w: 34, h: 114, pulse: true, period: 3.8 + rng() * 0.6, phase: rng() * 3.8 });
+      for (const x of e.vents || []) hazards.push({ kind: "garlic", visual: "vent", x: xPoint(x), y: FLOOR - 46, w: 44, h: 92, pulse: true, period: 4.4, phase: rng() * 4.4 });
       if (index % 3 === 0 && !e.priest) hazards.push({ kind: "garlic", x: end - 90, y: FLOOR - 18, w: 26, h: 36 });
       start = end;
     });
@@ -158,7 +181,7 @@
       settings.chapter % 2 ? { key: "time", target: Math.round(settings.duration * 0.65), reward: 18, title: "Seconds to spare" } : { key: "untouched", target: 0, reward: 18, title: "Lose no coffins" },
     ];
     const gates = settings.oneWay ? sections.slice(1).map((section) => ({ x: section.start, checkpoint: section.start + 80, keyIds: sections.slice(0,section.index).filter(s => s.keyId !== undefined).map(s => s.keyId) })) : [];
-    return { ...settings, seed: seed >>> 0, name: spec.name, theme: THEMES[spec.theme], width, platforms, gaps, pickups, hazards, humans, sections, checkpoints, gates, contracts, requiredKeys: spec.keys, crypt: { x: width - 110, y: FLOOR } };
+    return { ...settings, seed: seed >>> 0, name: spec.name, themeKey: spec.theme, theme: THEMES[spec.theme], width, platforms, gaps, pickups, hazards, humans, sections, checkpoints, gates, contracts, requiredKeys: spec.keys, crypt: { x: width - 110, y: FLOOR } };
   }
   const api = { FLOOR, ONE_WAY_FROM_NIGHT, CAMPAIGN, THEMES, ENCOUNTERS, HINTS, nightSettings, sectionAt, buildLevel };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

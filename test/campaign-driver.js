@@ -5,7 +5,7 @@ function play(w, debug = false, detours = false) {
   const route = [];
   for (const section of w.level.sections) {
     for (const id of detours ? section.detour : section.route) route.push({ platform: w.level.platforms[id], section: section.index });
-    route.push({ x: section.end - 30, y: R.FLOOR, w: 45, section: section.index });
+    route.push({ x: section.end + 35, y: R.FLOOR, w: 45, section: section.index });
   }
   route.push({ x: w.level.crypt.x + 5, y: R.FLOOR, w: 40 });
   let index = 0, lastLost = 0, maxHeight = R.FLOOR;
@@ -62,7 +62,19 @@ function play(w, debug = false, detours = false) {
       } else jump=true;
     }
     if (p.grounded && w.projectiles.some(s=>Math.abs(s.x-p.x)<65 && s.vx*(p.x-s.x)>0 && p.y<s.y+15 && p.y+p.h>s.y)) jump=true;
-    R.step(w, { move, jump, stun: true, bite: true });
+    let focus = false;
+    const human = w.level.humans.find(h => h.state !== 'vampire' && h.behavior !== 'hunter' && Math.abs(h.y-p.y)<18 && h.x-p.x>-10 && h.x-p.x<78);
+    if (human && p.grounded) {
+      const distance = human.x-p.x;
+      if (human.behavior !== 'priest') {
+        jump=false;
+        move = Math.abs(distance)>(human.state==='stunned'?21:44) ? Math.sign(distance) : p.facing!==Math.sign(distance) && distance!==0 ? Math.sign(distance) : 0;
+        focus = move===0;
+      }
+    }
+    const priest = w.level.humans.find(h=>h.behavior==='priest' && h.state==='human' && h.x-p.x>0 && h.x-p.x<112);
+    if (priest && p.grounded) { move=1; jump=true; focus=false; }
+    R.step(w, { move, jump, stun: focus, bite: true });
     maxHeight=Math.min(maxHeight,p.y+p.h);
     if(w.stats.lost>lastLost){
       if(debug)console.log('lost',w.elapsed,p.x,index,w.reason);
