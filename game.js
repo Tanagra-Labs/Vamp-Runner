@@ -1,932 +1,1353 @@
-// Vampire Runner — MVP
-// Phaser 3 via CDN, no build step, mobile-first
+// Vamp Runner — a mobile vampire platformer. Phaser 3.60, no build step.
+/* global Phaser, VampRules, VampAudio, VampBat */
+const {
+  FLOOR, MAX_LIVES, STEP, UPGRADES, COFFIN_COST, GATE_HALF_WIDTH, CAMPAIGN, createWorld, step,
+  cleanProgress, cleanRun, purchase, targetHuman, canGlamour, interruptGlamour, advanceClock, dawnState, cleanScores, contractResults, pulseState, gateState, nightSettings, sectionAt,
+} = VampRules;
+const GAME_W = 390,
+  GAME_H = 844;
+const C = {
+  ink: 0x0b1018,
+  panel: 0x121c29,
+  line: 0x334353,
+  cream: 0xeee5d3,
+  red: 0xd44d66,
+  mint: 0x90d9bf,
+  gold: 0xe3bb73,
+  muted: 0x94a4b5,
+};
+const FONT = "Georgia, serif",
+  MONO = "Courier New, monospace";
 
-const GAME_W = 390;
-const GAME_H = 844;
+const Save = {
+  read(key, fallback) {
+    try {
+      return JSON.parse(localStorage.getItem(key)) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  },
+  write(key, value) {
+    if (key === "vampRunnerProgress") this.sessionProgress = cleanProgress(value);
+    if (key === "vampRunnerCampaign") this.sessionRun = cleanRun(value);
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  scores() {
+    return cleanScores(this.read("vampRunnerScores", []));
+  },
+  progress() {
+    return cleanProgress(this.sessionProgress ?? this.read("vampRunnerProgress", {}));
+  },
+  run() {
+    return cleanRun(this.sessionRun === undefined ? this.read("vampRunnerCampaign", null) : this.sessionRun);
+  },
+  settings() {
+    const saved = this.read("vampRunnerSettings", {});
+    return {
+      sound: saved?.sound === true,
+      reducedMotion:
+        typeof saved?.reducedMotion === "boolean"
+          ? saved.reducedMotion
+          : !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
+    };
+  },
+};
+let preferences = Save.settings();
+const Sfx = VampAudio.createSound({ enabled: () => preferences.sound });
 
-const TILE = 40;
-const MAP_COLS = 20;
-const MAP_ROWS = 30;
-const MAP_W = MAP_COLS * TILE;
-const MAP_H = MAP_ROWS * TILE;
-
-const PLAYER_SPEED = 200;
-const SUNRISE_DURATION = 90; // seconds
-const GARLIC_HITS_PER_LIFE = 3;
-const MAX_LIVES = 3;
-const NPC_SPEED = 55;
-const PRIEST_SPEED = 42;
-const GLAMOUR_RANGE = 72;
-
-// ── Map variants ─────────────────────────────────────────────────────────────
-// variant 0 = horizontal corridors (original)
-// variant 1 = dense chokepoints
-// variant 2 = open-centre with perimeter pillars
-
-function buildLevelData(variant = 0) {
-  const R = MAP_ROWS;
-  const C = MAP_COLS;
-  const grid = Array.from({ length: R }, () => new Array(C).fill(0));
-
-  // Always border walls
-  for (let c = 0; c < C; c++) { grid[0][c] = 1; grid[R - 1][c] = 1; }
-  for (let r = 0; r < R; r++) { grid[r][0] = 1; grid[r][C - 1] = 1; }
-
-  if (variant === 0) {
-    // Horizontal corridor walls — original layout
-    [
-      [4, 2, 8], [4, 11, 17],
-      [8, 4, 9], [8, 12, 18],
-      [12, 1, 6], [12, 9, 14],
-      [16, 3, 10], [16, 13, 17],
-      [20, 2, 7], [20, 11, 16],
-      [24, 4, 9], [24, 12, 18],
-    ].forEach(([r, c1, c2]) => { for (let c = c1; c <= c2; c++) grid[r][c] = 1; });
-
-    [[6,7],[6,12],[10,3],[10,16],[14,9],[18,7],[22,10],[26,5],[26,14]]
-      .forEach(([r, c]) => { if (!grid[r][c]) grid[r][c] = 4; });
-
-  } else if (variant === 1) {
-    // Dense chokepoints — tight vertical slots force the player to pick routes
-    [
-      [3, 1, 7],  [3, 13, 19],
-      [6, 4, 10], [6, 11, 16],
-      [9, 2, 6],  [9, 14, 18],
-      [13, 5, 9], [13, 12, 17],
-      [17, 1, 8], [17, 11, 15],
-      [21, 3, 9], [21, 12, 18],
-      [25, 2, 7], [25, 13, 18],
-    ].forEach(([r, c1, c2]) => { for (let c = c1; c <= c2; c++) grid[r][c] = 1; });
-
-    // Vertical dividers to create narrow gaps
-    [[5,10],[10,10],[15,10],[20,10]]
-      .forEach(([r, c]) => { grid[r][c] = 1; grid[r+1][c] = 1; });
-
-    [[5,5],[8,14],[11,3],[14,16],[18,8],[22,11],[26,6],[26,15],[4,10]]
-      .forEach(([r, c]) => { if (!grid[r][c]) grid[r][c] = 4; });
-
-  } else {
-    // Open centre — perimeter rooms with 3×3 pillar clusters in the open field
-    const pillars = [
-      [4,3],[4,4],[5,3],
-      [4,16],[4,17],[5,17],
-      [8,7],[8,8],[9,7],
-      [8,12],[8,13],[9,13],
-      [14,3],[14,4],[15,3],
-      [14,16],[14,17],[15,17],
-      [19,6],[19,7],[20,6],
-      [19,12],[19,13],[20,13],
-      [24,4],[24,5],[25,4],
-      [24,15],[24,16],[25,16],
-    ];
-    pillars.forEach(([r, c]) => { grid[r][c] = 1; });
-
-    // Two horizontal half-walls at mid-map to break line-of-sight
-    for (let c = 1; c <= 6; c++)  grid[12][c] = 1;
-    for (let c = 13; c <= 18; c++) grid[12][c] = 1;
-    for (let c = 1; c <= 6; c++)  grid[22][c] = 1;
-    for (let c = 13; c <= 18; c++) grid[22][c] = 1;
-
-    [[6,10],[10,5],[10,15],[16,9],[16,11],[20,4],[20,16],[27,8],[27,13]]
-      .forEach(([r, c]) => { if (!grid[r][c]) grid[r][c] = 4; });
+function label(scene, x, y, text, size = 14, color = "#eee5d3", mono = false) {
+  return scene.add.text(x, y, text, {
+    fontFamily: mono ? MONO : FONT,
+    fontSize: size + "px",
+    color,
+  });
+}
+function button(scene, x, y, width, text, callback, primary = false) {
+  const bg = scene.add
+    .rectangle(x, y, width, 48, primary ? C.red : C.panel)
+    .setStrokeStyle(1, primary ? C.red : C.line)
+    .setScrollFactor(0)
+    .setInteractive({ useHandCursor: true });
+  const caption = label(
+    scene,
+    x,
+    y,
+    text,
+    13,
+    primary ? "#ffffff" : "#eee5d3",
+    true,
+  ).setOrigin(0.5).setScrollFactor(0);
+  bg.on("pointerover", () => bg.setFillStyle(primary ? 0xe15d75 : 0x263344));
+  bg.on("pointerout", () => bg.setFillStyle(primary ? C.red : C.panel));
+  bg.on("pointerdown", (pointer, lx, ly, event) => {
+    event?.stopPropagation();
+    callback();
+  });
+  return { bg, caption };
+}
+function onKey(scene, event, callback) {
+  scene.input.keyboard.on(event, callback);
+  scene.events.once("shutdown", () => scene.input.keyboard.off(event, callback));
+}
+function vignette(scene) {
+  const g = scene.add.graphics();
+  g.fillStyle(C.ink);
+  g.fillRect(0, 0, GAME_W, GAME_H);
+  for (let i = 5; i > 0; i--) {
+    g.fillStyle(0x243149, 0.07);
+    g.fillCircle(285, 180, 50 + i * 22);
   }
-
-  grid[1][10] = 5; // shelter always at top-centre
-  return grid;
+  g.fillStyle(0xc9cebd);
+  g.fillCircle(285, 175, 37);
+  g.fillStyle(0x131c29);
+  g.fillCircle(299, 165, 32);
+  for (let i = 0; i < 45; i++) {
+    g.fillStyle(C.cream, ((i % 3) + 1) / 7);
+    g.fillRect((i * 83 + 11) % GAME_W, (i * 47 + 17) % 330, 1, 1);
+  }
+  for (let i = 0; i < 12; i++) {
+    const x = i * 36 - 10,
+      h = 40 + ((i * 37) % 90);
+    g.fillStyle(0x101822);
+    g.fillRect(x, 367 - h, 32, h);
+    g.fillTriangle(x - 2, 367 - h, x + 16, 347 - h, x + 34, 367 - h);
+    g.fillStyle(C.gold, 0.25);
+    g.fillRect(x + 14, 381 - h, 4, 10);
+  }
+  g.lineStyle(1, C.line, 0.5);
+  g.lineBetween(24, 367, 366, 367);
 }
-
-// NPC starting positions per map variant
-function getNPCSpawns(variant = 0) {
-  const spawns = [
-    // variant 0 — original
-    [
-      { r: 3,  c: 4,  type: 'priest' }, { r: 3,  c: 14, type: 'priest' },
-      { r: 7,  c: 2,  type: 'priest' }, { r: 7,  c: 11, type: 'priest' },
-      { r: 11, c: 7,  type: 'priest' }, { r: 23, c: 4,  type: 'priest' },
-      { r: 5,  c: 3,  type: 'garlic' }, { r: 5,  c: 16, type: 'garlic' },
-      { r: 9,  c: 5,  type: 'garlic' }, { r: 9,  c: 13, type: 'garlic' },
-      { r: 17, c: 5,  type: 'garlic' }, { r: 17, c: 14, type: 'garlic' },
-      { r: 6,  c: 10, type: 'plain'  }, { r: 13, c: 3,  type: 'plain'  },
-      { r: 15, c: 13, type: 'plain'  }, { r: 19, c: 6,  type: 'plain'  },
-      { r: 21, c: 15, type: 'plain'  }, { r: 25, c: 8,  type: 'plain'  },
-    ],
-    // variant 1 — dense chokepoints
-    [
-      { r: 4,  c: 9,  type: 'priest' }, { r: 4,  c: 11, type: 'priest' },
-      { r: 8,  c: 2,  type: 'priest' }, { r: 8,  c: 17, type: 'priest' },
-      { r: 16, c: 10, type: 'priest' }, { r: 24, c: 9,  type: 'priest' },
-      { r: 7,  c: 3,  type: 'garlic' }, { r: 7,  c: 17, type: 'garlic' },
-      { r: 12, c: 3,  type: 'garlic' }, { r: 12, c: 18, type: 'garlic' },
-      { r: 19, c: 5,  type: 'garlic' }, { r: 19, c: 16, type: 'garlic' },
-      { r: 6,  c: 11, type: 'plain'  }, { r: 11, c: 6,  type: 'plain'  },
-      { r: 14, c: 12, type: 'plain'  }, { r: 20, c: 9,  type: 'plain'  },
-      { r: 23, c: 5,  type: 'plain'  }, { r: 27, c: 14, type: 'plain'  },
-    ],
-    // variant 2 — open centre
-    [
-      { r: 3,  c: 5,  type: 'priest' }, { r: 3,  c: 15, type: 'priest' },
-      { r: 7,  c: 10, type: 'priest' }, { r: 13, c: 9,  type: 'priest' },
-      { r: 18, c: 4,  type: 'priest' }, { r: 23, c: 14, type: 'priest' },
-      { r: 6,  c: 3,  type: 'garlic' }, { r: 6,  c: 17, type: 'garlic' },
-      { r: 11, c: 7,  type: 'garlic' }, { r: 11, c: 12, type: 'garlic' },
-      { r: 17, c: 9,  type: 'garlic' }, { r: 21, c: 15, type: 'garlic' },
-      { r: 5,  c: 10, type: 'plain'  }, { r: 10, c: 4,  type: 'plain'  },
-      { r: 13, c: 14, type: 'plain'  }, { r: 18, c: 11, type: 'plain'  },
-      { r: 23, c: 5,  type: 'plain'  }, { r: 26, c: 10, type: 'plain'  },
-    ],
-  ];
-  return spawns[variant] || spawns[0];
-}
-
-// ─── SCENES ──────────────────────────────────────────────────────────────────
 
 class BootScene extends Phaser.Scene {
-  constructor() { super('Boot'); }
-
-  create() {
-    // Generate textures programmatically — no external assets needed
-    this.makeTextures();
-    this.scene.start('Game');
+  constructor() {
+    super("Boot");
   }
-
+  create() {
+    document.getElementById("loading")?.remove();
+    this.makeTextures();
+    this.scene.start("Menu");
+  }
   makeTextures() {
     const g = this.make.graphics({ x: 0, y: 0, add: false });
-
-    // Floor — city asphalt
-    g.clear();
-    g.fillStyle(0x1c1f26);
-    g.fillRect(0, 0, TILE, TILE);
-    g.lineStyle(1, 0x252a35, 1);
-    g.strokeRect(0, 0, TILE, TILE);
-    g.lineStyle(1, 0x23272e, 0.6);
-    g.lineBetween(TILE / 2, 0, TILE / 2, TILE);
-    g.lineBetween(0, TILE / 2, TILE, TILE / 2);
-    g.generateTexture('floor', TILE, TILE);
-
-    // Wall — building facade with lit windows
-    g.clear();
-    g.fillStyle(0x0e1118);
-    g.fillRect(0, 0, TILE, TILE);
-    g.fillStyle(0x141820);
-    g.fillRect(2, 2, TILE - 4, TILE - 4);
-    g.fillStyle(0xffdd88, 0.7);
-    g.fillRect(6, 6, 8, 6);
-    g.fillRect(22, 6, 8, 6);
-    g.fillRect(6, 22, 8, 6);
-    g.fillRect(22, 22, 8, 6);
-    g.generateTexture('wall', TILE, TILE);
-
-    // Cross obstacle (unchanged — still used in current GameScene)
-    g.clear();
-    g.fillStyle(0x1c1f26);
-    g.fillRect(0, 0, TILE, TILE);
-    g.fillStyle(0xc0c0c0);
-    g.fillRect(17, 6, 6, 28);
-    g.fillRect(8, 12, 24, 6);
-    g.generateTexture('cross', TILE, TILE);
-
-    // Garlic — proper bulb with cloves and green stem
-    g.clear();
-    g.fillStyle(0x1c1f26);
-    g.fillRect(0, 0, TILE, TILE);
-    // papery outer skin
-    g.fillStyle(0xfaf0e6);
-    g.fillCircle(20, 24, 11);
-    // clove sections
-    g.fillStyle(0xe8d8c0);
-    g.fillCircle(14, 22, 6);
-    g.fillCircle(26, 22, 6);
-    g.fillCircle(20, 29, 6);
-    // clove division lines
-    g.lineStyle(1, 0xccb090, 1);
-    g.lineBetween(20, 14, 20, 32);
-    g.lineBetween(11, 20, 29, 28);
-    g.lineBetween(11, 28, 29, 20);
-    // stem
-    g.fillStyle(0x6a8e4e);
-    g.fillRect(18, 5, 4, 12);
-    // base wrapper
-    g.fillStyle(0xd4c4a0);
-    g.fillEllipse(20, 15, 14, 6);
-    g.generateTexture('garlic', TILE, TILE);
-
-    // Blood syringe
-    g.clear();
-    g.fillStyle(0x1c1f26);
-    g.fillRect(0, 0, TILE, TILE);
-    g.fillStyle(0x888888);
-    g.fillRect(14, 8, 12, 6);
-    g.fillStyle(0xcc0000);
-    g.fillRect(10, 14, 20, 12);
-    g.fillStyle(0xaaaaaa);
-    g.fillRect(17, 26, 6, 8);
-    g.generateTexture('syringe', TILE, TILE);
-
-    // Shelter (coffin)
-    g.clear();
-    g.fillStyle(0x1c1f26);
-    g.fillRect(0, 0, TILE, TILE);
-    g.fillStyle(0x3d1c02);
-    g.fillRect(6, 4, 28, 32);
-    g.fillStyle(0x5a2d0c);
-    g.fillRect(8, 6, 24, 28);
-    g.fillStyle(0x8b0000);
-    g.fillRect(16, 14, 8, 12);
-    g.generateTexture('shelter', TILE, TILE);
-
-    // Player (vampire)
-    g.clear();
-    g.fillStyle(0x1a0a2e);
-    g.fillCircle(16, 16, 14);
-    g.fillStyle(0xf5cba7);
-    g.fillCircle(16, 13, 7);
-    g.fillStyle(0x2c003e);
-    g.fillRect(4, 20, 24, 12);
-    g.fillStyle(0x8b0000);
-    g.fillRect(10, 21, 12, 4);
-    g.fillStyle(0x1a0030);
-    g.fillTriangle(4, 22, 16, 32, 28, 22);
-    g.generateTexture('player', 32, 32);
-
-    // NPC: Priest — black robe, pale face, holds cross
-    g.clear();
-    g.fillStyle(0x111111);
-    g.fillRect(8, 14, 16, 18);
-    g.fillEllipse(16, 28, 20, 10);
-    g.fillStyle(0xf0d0a0);
-    g.fillCircle(16, 10, 7);
-    // collar
-    g.fillStyle(0xffffff);
-    g.fillRect(13, 16, 6, 4);
-    // cross held out to the side
-    g.fillStyle(0xd4aa70);
-    g.fillRect(25, 15, 4, 14);
-    g.fillRect(21, 19, 12, 4);
-    g.generateTexture('npc_priest', 32, 32);
-
-    // NPC: Garlic civilian — neutral clothes, carries garlic bundle
-    g.clear();
-    g.fillStyle(0x4a5568);
-    g.fillRect(9, 14, 14, 16);
-    g.fillEllipse(16, 28, 18, 10);
-    g.fillStyle(0xf0c8a0);
-    g.fillCircle(16, 10, 7);
-    g.fillRect(4, 16, 6, 4);
-    // garlic bundle
-    g.fillStyle(0xfaf0e6);
-    g.fillCircle(26, 20, 6);
-    g.fillStyle(0x6a8e4e);
-    g.fillRect(25, 14, 2, 6);
-    g.generateTexture('npc_garlic', 32, 32);
-
-    // NPC: Plain civilian — blue-grey, no hazard
-    g.clear();
-    g.fillStyle(0x3d5a80);
-    g.fillRect(9, 14, 14, 16);
-    g.fillEllipse(16, 28, 18, 10);
-    g.fillStyle(0xf0c8a0);
-    g.fillCircle(16, 10, 7);
-    g.fillRect(4, 16, 6, 4);
-    g.fillRect(22, 16, 6, 4);
-    g.generateTexture('npc_plain', 32, 32);
-
-    // NPC: Glamoured civilian — purple aura, glowing eyes
-    g.clear();
-    g.fillStyle(0x6600aa, 0.3);
-    g.fillCircle(16, 16, 16);
-    g.fillStyle(0x6644aa);
-    g.fillRect(9, 14, 14, 16);
-    g.fillEllipse(16, 28, 18, 10);
-    g.fillStyle(0xf0c8a0);
-    g.fillCircle(16, 10, 7);
-    g.fillRect(4, 16, 6, 4);
-    g.fillRect(22, 16, 6, 4);
-    // glowing eyes
-    g.fillStyle(0xff44ff);
-    g.fillCircle(13, 10, 2);
-    g.fillCircle(19, 10, 2);
-    g.generateTexture('npc_glamoured', 32, 32);
-
+    const texture = (name, draw, w = 40, h = 40) => {
+      g.clear();
+      draw();
+      g.generateTexture(name, w, h);
+    };
+    texture("floor", () => {
+      g.fillStyle(0x1b2933);
+      g.fillRect(0, 0, 40, 40);
+      [
+        [1, 1, 18, 10],
+        [21, 1, 18, 10],
+        [1, 13, 9, 12],
+        [12, 13, 27, 12],
+        [1, 27, 22, 12],
+        [25, 27, 14, 12],
+      ].forEach(([x, y, w, h], i) => {
+        g.fillStyle(i % 2 ? 0x202f38 : 0x22313a);
+        g.fillRoundedRect(x, y, w, h, 2);
+        g.lineStyle(1, 0x34404a, 0.45);
+        g.lineBetween(x + 2, y + 1, x + w - 2, y + 1);
+      });
+    });
+    texture("wall", () => {
+      g.fillStyle(0x080e15);
+      g.fillRect(0, 0, 40, 40);
+      g.fillStyle(0x324250);
+      g.fillRect(0, 0, 40, 33);
+      g.fillStyle(0x283743);
+      g.fillRect(2, 3, 36, 27);
+      g.lineStyle(1, 0x546272, 0.6);
+      g.lineBetween(0, 1, 40, 1);
+      g.lineStyle(1, 0x1a2531);
+      g.lineBetween(0, 14, 40, 14);
+      g.lineBetween(20, 0, 20, 14);
+      g.lineBetween(10, 14, 10, 30);
+      g.fillStyle(0x151e2b);
+      g.fillRoundedRect(23, 7, 10, 18, 5);
+      g.fillStyle(C.gold, 0.8);
+      g.fillRect(26, 10, 4, 10);
+      g.fillStyle(0x283743);
+      g.fillRect(25, 15, 6, 2);
+      g.fillStyle(0x050a10, 0.7);
+      g.fillRect(0, 33, 40, 7);
+    });
+    texture("syringe", () => {
+      g.fillStyle(C.red, 0.09);
+      g.fillCircle(20, 20, 19);
+      g.lineStyle(1, C.red, 0.25);
+      g.strokeCircle(20, 20, 15);
+      g.fillStyle(0xe5dccc);
+      g.fillRect(14, 9, 12, 3);
+      g.fillRect(18, 6, 4, 5);
+      g.fillStyle(0x718594);
+      g.fillRect(16, 13, 8, 15);
+      g.fillStyle(0xf08c99);
+      g.fillRect(18, 15, 4, 9);
+      g.fillStyle(0xe5dccc);
+      g.fillRect(19, 28, 2, 6);
+    });
+    texture("dirt", () => {
+      g.fillStyle(C.gold, 0.13); g.fillCircle(20, 20, 18);
+      g.fillStyle(0x91755c); g.fillTriangle(4, 29, 19, 14, 36, 29);
+      g.fillStyle(0xd6b782); g.fillTriangle(10, 27, 19, 17, 27, 27);
+      g.fillStyle(0x6b605c); g.fillRoundedRect(16, 7, 9, 12, 4);
+      g.fillStyle(C.cream); g.fillRect(30, 9, 2, 6); g.fillRect(28, 11, 6, 2);
+    });
+    texture("iv", () => {
+      g.fillStyle(C.red, 0.16); g.fillCircle(20, 20, 19);
+      g.lineStyle(2, 0xc8d9df); g.strokeRoundedRect(10, 5, 20, 25, 4);
+      g.fillStyle(C.red); g.fillRoundedRect(13, 14, 14, 13, 2);
+      g.lineStyle(2, 0xc8d9df); g.lineBetween(20, 30, 20, 36); g.lineBetween(20, 36, 28, 36);
+      g.fillStyle(C.cream); g.fillRect(18, 2, 4, 4); g.fillRect(18, 17, 4, 8); g.fillRect(16, 19, 8, 4);
+    });
+    texture("key", () => {
+      g.fillStyle(0x90d6f5, 0.16); g.fillCircle(20, 20, 19);
+      g.lineStyle(3, 0x90d6f5); g.strokeCircle(15, 13, 6);
+      g.lineBetween(19, 17, 30, 29); g.lineBetween(26, 24, 30, 20); g.lineBetween(29, 28, 33, 24);
+    });
+    texture("garlic", () => {
+      g.fillStyle(0xe7dbc1); g.fillEllipse(20, 25, 25, 23);
+      g.fillStyle(0xc5b99e); g.fillEllipse(12, 26, 8, 16); g.fillEllipse(28, 26, 8, 16);
+      g.fillStyle(0xf6ecd4); g.fillEllipse(20, 25, 8, 20);
+      g.fillStyle(0x91a578); g.fillTriangle(16, 16, 19, 3, 23, 16);
+    });
+    texture("cross", () => {
+      g.fillStyle(C.gold, 0.12); g.fillCircle(20, 20, 19);
+      g.fillStyle(0xb28d5f); g.fillRect(14, 2, 12, 36); g.fillRect(4, 11, 32, 11);
+      g.fillStyle(0xf6d899); g.fillRect(17, 4, 6, 32); g.fillRect(6, 14, 28, 5);
+    });
+    texture("shelter", () => {
+      g.fillStyle(C.mint, 0.12);
+      g.fillCircle(20, 20, 20);
+      g.fillStyle(0x071510);
+      g.fillPoints(
+        [
+          { x: 12, y: 3 },
+          { x: 28, y: 3 },
+          { x: 34, y: 13 },
+          { x: 29, y: 37 },
+          { x: 11, y: 37 },
+          { x: 6, y: 13 },
+        ],
+        true,
+      );
+      g.lineStyle(2, C.mint);
+      g.strokePoints(
+        [
+          { x: 12, y: 3 },
+          { x: 28, y: 3 },
+          { x: 34, y: 13 },
+          { x: 29, y: 37 },
+          { x: 11, y: 37 },
+          { x: 6, y: 13 },
+        ],
+        true,
+      );
+      g.lineStyle(1, 0x477567);
+      g.strokeRect(14, 10, 12, 20);
+      g.fillStyle(C.gold);
+      g.fillCircle(23, 21, 1.5);
+    });
+    const person = (name, robe, emblem, step = false) =>
+      texture(
+        name,
+        () => {
+          g.fillStyle(0x000000, 0.25);
+          g.fillEllipse(16, 29, 27, 6);
+          g.fillStyle(0x101322);
+          g.fillRect(step ? 9 : 10, 25, 5, 6);
+          g.fillRect(step ? 20 : 18, 25, 5, 6);
+          g.fillStyle(robe);
+          g.fillTriangle(16, 10, 3, 28, 29, 28);
+          g.fillRect(10, 14, 12, 12);
+          g.fillStyle(0xf0d8c5);
+          g.fillCircle(16, 9, 6);
+          g.fillStyle(0x171521);
+          g.fillRect(10, 3, 12, 4);
+          g.fillRect(10, 6, 2, 4);
+          g.fillStyle(0x11121b);
+          g.fillRect(13, 9, 2, 2);
+          g.fillRect(18, 9, 2, 2);
+          if (emblem === "vampire") {
+            g.fillStyle(0xf27688);
+            g.fillTriangle(4, 16, 12, 18, 9, 24);
+            g.fillTriangle(28, 16, 20, 18, 23, 24);
+            g.fillStyle(0xffffff);
+            g.fillRect(13, 13, 1, 2);
+            g.fillRect(18, 13, 1, 2);
+          } else if (emblem === "cross") {
+            g.fillStyle(C.gold);
+            g.fillRect(25, 12, 3, 16);
+            g.fillRect(21, 16, 11, 3);
+            g.fillStyle(0xffffff);
+            g.fillRect(14, 16, 4, 2);
+          } else if (emblem === "garlic") {
+            g.fillStyle(0xe6dfba);
+            g.fillCircle(26, 22, 5);
+            g.fillStyle(0x90b776);
+            g.fillRect(25, 15, 2, 4);
+          } else if (emblem === "ally") {
+            g.lineStyle(1, C.mint, 0.8);
+            g.strokeCircle(16, 15, 15);
+            g.fillStyle(C.mint);
+            g.fillRect(13, 9, 2, 2);
+            g.fillRect(18, 9, 2, 2);
+          }
+        },
+        32,
+        34,
+      );
+    person("player", 0x93344e, "vampire");
+    person("player_step", 0x93344e, "vampire", true);
+    person("npc_priest", 0x171722, "cross");
+    person("npc_garlic", 0x716344, "garlic");
+    person("npc_plain", 0x496780, "plain");
+    person("npc_glamoured", 0x477d73, "ally");
     g.destroy();
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-class GameScene extends Phaser.Scene {
-  constructor() { super('Game'); }
-
-  init(data = {}) {
-    this.nightNumber      = data.nightNumber      || 1;
-    this.accumulatedScore = data.accumulatedScore || 0;
-    this.lives            = data.lives            !== undefined ? data.lives : MAX_LIVES;
+class MenuScene extends Phaser.Scene {
+  constructor() {
+    super("Menu");
   }
-
   create() {
-    this.cameras.main.setBackgroundColor('#000000');
-
-    // Per-night difficulty
-    this.effectiveDuration = Math.max(40, SUNRISE_DURATION - (this.nightNumber - 1) * 6);
-    this.npcSpeedMult      = 1 + (this.nightNumber - 1) * 0.12;
-
-    this.garlicHits = 0;
-    this.timeLeft = this.effectiveDuration;
-    this.gameOver = false;
-    this.invincible = false;
-    this.syringesCollected = 0;
-    this.glamouredEver = 0;
-    this.livesLost = 0;
-
-    const mapVariant = Math.floor((this.nightNumber - 1) / 5) % 3;
-    this.levelData = buildLevelData(mapVariant);
-    this.buildWorld();
-    this.spawnPlayer();
-    this.spawnNPCs();
-
-    this.sunlightHeight = 0;
-    this.sunlightGraphic = this.add.graphics().setDepth(5);
-
-    this.cameras.main.setBounds(0, 0, MAP_W, MAP_H);
-    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-
-    this.buildUI();
-    this.buildJoystick();
-
-    this.physics.add.collider(this.player, this.walls);
-    this.physics.add.overlap(this.player, this.npcGroup, (player, npcSprite) => {
-      const npc = this.npcs.find(n => n.sprite === npcSprite);
-      if (!npc || npc.glamoured) return;
-      if (npc.type === 'priest') this.hitByPriest();
-      else if (npc.type === 'garlic') this.hitByGarlicNPC();
+    vignette(this);
+    Sfx.setTheme("quarter");
+    label(this, 24, 32, "TANAGRA LABS  /  AFTER HOURS", 10, "#a7b7c3", true);
+    label(this, 24, 103, "VAMP", 67);
+    label(this, 24, 173, "RUNNER", 58);
+    label(
+      this,
+      26,
+      256,
+      "The city is waking. You shouldn’t be.",
+      16,
+      "#afbec9",
+    );
+    const progress = Save.progress();
+    const medals = progress.medals.reduce((sum, mask) => sum + [1, 2, 4].filter((bit) => mask & bit).length, 0);
+    label(this, 26, 313, `12 NIGHTS · 8 DISTRICTS · ${medals}/36 MARKS`, 10, "#dfb778", true);
+    label(this, 24, 395, "Make it home before dawn.", 24);
+    label(
+      this,
+      24,
+      435,
+      "Find the blue keys. Unlock your crypt.\nThree garlic hits or one cross: lose a coffin.",
+      14,
+      "#afbec9",
+    ).setLineSpacing(6);
+    const rows = [
+      ["01", "RUN & JUMP", "← → / A D / Q D. Space to jump."],
+      ["02", "GLAMOUR → BITE", "Hold E, face them, stay still. F to bite."],
+      ["03", "BUILD YOUR COVEN", "Dirt + healing. Three bites earn a shield."],
+    ];
+    rows.forEach(([num, title, copy], i) => {
+      const y = 500 + i * 54;
+      label(this, 24, y, num, 11, "#bd7485", true);
+      label(this, 57, y, title, 11, "#eee5d3", true);
+      label(this, 57, y + 19, copy, 12, "#a5b5c4");
     });
-    this.physics.add.overlap(this.player, this.syringes, this.collectSyringe, null, this);
-    this.physics.add.overlap(this.player, this.shelterGroup, this.reachShelter, null, this);
-
-    this.time.addEvent({ delay: 1000, loop: true, callback: this.tickTimer, callbackScope: this });
-
-    const hint = this.add.text(GAME_W / 2, GAME_H - 80, 'Tap civilians to glamour them', {
-      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#cc44ff',
-      stroke: '#000', strokeThickness: 2, align: 'center',
-    }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5);
-    this.tweens.add({ targets: hint, alpha: 0, duration: 1200, delay: 3000, onComplete: () => hint.destroy() });
-  }
-
-  // ── World ──────────────────────────────────────────────────────────────────
-
-  buildWorld() {
-    this.walls = this.physics.add.staticGroup();
-    this.syringes = this.physics.add.staticGroup();
-    this.shelterGroup = this.physics.add.staticGroup();
-
-    for (let r = 0; r < MAP_ROWS; r++) {
-      for (let c = 0; c < MAP_COLS; c++) {
-        const x = c * TILE + TILE / 2;
-        const y = r * TILE + TILE / 2;
-        const cell = this.levelData[r][c];
-        this.add.image(x, y, 'floor').setDepth(0);
-        if      (cell === 1) this.walls.create(x, y, 'wall').setDepth(1).refreshBody();
-        else if (cell === 4) this.syringes.create(x, y, 'syringe').setDepth(1).refreshBody();
-        else if (cell === 5) this.shelterGroup.create(x, y, 'shelter').setDepth(1).refreshBody();
-      }
-    }
-  }
-
-  spawnPlayer() {
-    const startX = Math.floor(MAP_COLS / 2) * TILE + TILE / 2;
-    const startY = (MAP_ROWS - 3) * TILE + TILE / 2;
-    this.player = this.physics.add.image(startX, startY, 'player')
-      .setDepth(3).setCircle(14, 2, 2).setCollideWorldBounds(true);
-    this.physics.world.setBounds(0, 0, MAP_W, MAP_H);
-  }
-
-  // ── NPCs ───────────────────────────────────────────────────────────────────
-
-  spawnNPCs() {
-    this.npcs = [];
-    this.npcGroup = this.physics.add.group();
-
-    const mapVariant = Math.floor((this.nightNumber - 1) / 5) % 3;
-    getNPCSpawns(mapVariant).forEach(({ r, c, type }) => {
-      const x = c * TILE + TILE / 2;
-      const y = r * TILE + TILE / 2;
-      const texKey = type === 'priest' ? 'npc_priest' : type === 'garlic' ? 'npc_garlic' : 'npc_plain';
-      const sprite = this.physics.add.image(x, y, texKey)
-        .setDepth(2).setCircle(12, 4, 4).setCollideWorldBounds(true);
-      this.npcGroup.add(sprite);
-      this.physics.add.collider(sprite, this.walls);
-
-      const npc = { sprite, type, glamoured: false, dirTimer: Phaser.Math.Between(400, 1800), dx: 0, dy: 0, stunned: false, stunTimer: 0, speedMult: this.npcSpeedMult };
-      this.pickDirection(npc);
-      this.npcs.push(npc);
-    });
-  }
-
-  pickDirection(npc) {
-    if (npc.glamoured) {
-      // Move toward nearest syringe, or idle near player
-      const target = this.nearestSyringe(npc.sprite.x, npc.sprite.y);
-      if (target) {
-        const dx = target.x - npc.sprite.x;
-        const dy = target.y - npc.sprite.y;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        npc.dx = dx / len; npc.dy = dy / len;
-      } else {
-        const dx = this.player.x - npc.sprite.x;
-        const dy = this.player.y - npc.sprite.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 80) { npc.dx = dx / dist; npc.dy = dy / dist; }
-        else { npc.dx = 0; npc.dy = 0; }
-      }
-      return;
-    }
-
-    // Priests bias toward player 50% of the time
-    if (npc.type === 'priest' && this.player && Math.random() < 0.5) {
-      const dx = this.player.x - npc.sprite.x;
-      const dy = this.player.y - npc.sprite.y;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      npc.dx = dx / len; npc.dy = dy / len;
-    } else {
-      const angle = Math.random() * Math.PI * 2;
-      npc.dx = Math.cos(angle); npc.dy = Math.sin(angle);
-    }
-  }
-
-  nearestSyringe(x, y) {
-    let best = null, bestDist = Infinity;
-    this.syringes.getChildren().forEach(s => {
-      const d = Phaser.Math.Distance.Between(x, y, s.x, s.y);
-      if (d < bestDist) { bestDist = d; best = s; }
-    });
-    return best;
-  }
-
-  updateNPCs(delta) {
-    this.npcs.forEach(npc => {
-      if (!npc.sprite.active) return;
-
-      if (npc.stunned) {
-        npc.stunTimer -= delta;
-        if (npc.stunTimer <= 0) { npc.stunned = false; npc.sprite.clearTint(); }
-        npc.sprite.setVelocity(0, 0);
-        return;
-      }
-
-      const blocked = !npc.sprite.body.blocked.none;
-      npc.dirTimer -= delta;
-      if (npc.dirTimer <= 0 || blocked) {
-        const interval = npc.glamoured ? 600 : npc.type === 'priest' ? 1500 : 2200;
-        npc.dirTimer = interval + Phaser.Math.Between(0, 500);
-        this.pickDirection(npc);
-      }
-
-      const base  = npc.glamoured ? NPC_SPEED * 1.3 : npc.type === 'priest' ? PRIEST_SPEED : NPC_SPEED;
-      const speed = base * npc.speedMult;
-      npc.sprite.setVelocity(npc.dx * speed, npc.dy * speed);
-      if (npc.dx < 0) npc.sprite.setFlipX(true);
-      else if (npc.dx > 0) npc.sprite.setFlipX(false);
-
-      if (npc.glamoured) {
-        // Collect nearby syringes
-        const nearby = this.nearestSyringe(npc.sprite.x, npc.sprite.y);
-        if (nearby && Phaser.Math.Distance.Between(npc.sprite.x, npc.sprite.y, nearby.x, nearby.y) < 22) {
-          nearby.destroy();
-          this.syringesCollected++;
-          if (this.garlicHits > 0) this.garlicHits = Math.max(0, this.garlicHits - 1);
-          this.updateUI();
-          this.floatText(npc.sprite.x, npc.sprite.y, '+BLOOD', '#ff2222');
-          this.pickDirection(npc);
-        }
-        // Stun nearby priests
-        this.npcs.forEach(other => {
-          if (other === npc || other.type !== 'priest' || other.glamoured || other.stunned) return;
-          if (Phaser.Math.Distance.Between(npc.sprite.x, npc.sprite.y, other.sprite.x, other.sprite.y) < 50) {
-            other.stunned = true;
-            other.stunTimer = 2000;
-            other.sprite.setTint(0xaaaaff);
-          }
-        });
-      }
-    });
-  }
-
-  // Tap-to-glamour: finds a plain NPC near the tapped world position
-  findGlamourTarget(wx, wy) {
-    for (const npc of this.npcs) {
-      if (npc.type !== 'plain' || npc.glamoured || !npc.sprite.active) continue;
-      if (Phaser.Math.Distance.Between(wx, wy, npc.sprite.x, npc.sprite.y) < GLAMOUR_RANGE) return npc;
-    }
-    return null;
-  }
-
-  glamourNPC(npc) {
-    npc.glamoured = true;
-    npc.sprite.setTexture('npc_glamoured');
-    npc.dirTimer = 0;
-    this.glamouredEver++;
-    this.updateUI();
-    this.cameras.main.flash(120, 80, 0, 120);
-    this.floatText(npc.sprite.x, npc.sprite.y - 10, 'GLAMOURED!', '#dd44ff');
-  }
-
-  // ── UI ─────────────────────────────────────────────────────────────────────
-
-  buildUI() {
-    this.timerBg = this.add.rectangle(GAME_W / 2, 28, GAME_W - 20, 20, 0x333333)
-      .setScrollFactor(0).setDepth(10).setOrigin(0.5, 0.5);
-    this.timerBar = this.add.rectangle(10, 18, GAME_W - 20, 16, 0xffa500)
-      .setScrollFactor(0).setDepth(11).setOrigin(0, 0);
-    this.timerText = this.add.text(GAME_W / 2, 28, '90', {
-      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#ffffff', stroke: '#000000', strokeThickness: 3,
-    }).setScrollFactor(0).setDepth(12).setOrigin(0.5, 0.5);
-
-    this.livesText = this.add.text(10, 50, '', {
-      fontFamily: 'Georgia, serif', fontSize: '22px', color: '#8b0000',
-    }).setScrollFactor(0).setDepth(10);
-
-    this.garlicText = this.add.text(GAME_W - 10, 50, '', {
-      fontFamily: 'Georgia, serif', fontSize: '14px', color: '#d4e6a5', stroke: '#000', strokeThickness: 2,
-    }).setScrollFactor(0).setDepth(10).setOrigin(1, 0);
-
-    this.glamourText = this.add.text(GAME_W / 2, 50, '', {
-      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#dd44ff', stroke: '#000', strokeThickness: 2,
-    }).setScrollFactor(0).setDepth(10).setOrigin(0.5, 0);
-
-    this.add.text(GAME_W - 10, GAME_H - 10, 'NIGHT ' + this.nightNumber, {
-      fontFamily: 'Georgia, serif', fontSize: '13px', color: '#556677', stroke: '#000', strokeThickness: 2,
-    }).setScrollFactor(0).setDepth(10).setOrigin(1, 1);
-
-    this.updateUI();
-  }
-
-  updateUI() {
-    const pct = this.timeLeft / SUNRISE_DURATION;
-    this.timerBar.width = Math.max(0, (GAME_W - 20) * pct);
-    this.timerBar.setFillStyle(pct > 0.5 ? 0xffa500 : pct > 0.25 ? 0xff6600 : 0xff2200);
-    this.timerText.setText(String(Math.max(0, this.timeLeft)) + 's');
-    this.livesText.setText('⚰'.repeat(this.lives));
-    this.garlicText.setText(this.garlicHits > 0 ? '🧄 ' + this.garlicHits + '/' + GARLIC_HITS_PER_LIFE : '');
-    const gc = this.npcs ? this.npcs.filter(n => n.glamoured).length : 0;
-    this.glamourText.setText(gc > 0 ? '✨ ' + gc + ' glamoured' : '');
-  }
-
-  floatText(x, y, msg, color) {
-    const txt = this.add.text(x, y, msg, {
-      fontFamily: 'Georgia, serif', fontSize: '15px', color, stroke: '#000', strokeThickness: 2,
-    }).setDepth(9);
-    this.tweens.add({ targets: txt, y: y - 45, alpha: 0, duration: 900, onComplete: () => txt.destroy() });
-  }
-
-  // ── Joystick ───────────────────────────────────────────────────────────────
-
-  buildJoystick() {
-    this.joystick = { active: false, pointerId: null, baseX: 0, baseY: 0, dx: 0, dy: 0 };
-    this.joyBase = this.add.circle(0, 0, 48, 0xffffff, 0.15).setScrollFactor(0).setDepth(15).setVisible(false);
-    this.joyStick = this.add.circle(0, 0, 24, 0xffffff, 0.35).setScrollFactor(0).setDepth(16).setVisible(false);
-
-    this.input.on('pointerdown', (p) => {
-      if (this.gameOver) return;
-      // Try glamour first
-      const target = this.findGlamourTarget(p.worldX, p.worldY);
-      if (target) { this.glamourNPC(target); return; }
-      if (!this.joystick.active) {
-        this.joystick.active = true;
-        this.joystick.pointerId = p.id;
-        this.joystick.baseX = p.x; this.joystick.baseY = p.y;
-        this.joyBase.setPosition(p.x, p.y).setVisible(true);
-        this.joyStick.setPosition(p.x, p.y).setVisible(true);
-      }
-    });
-
-    this.input.on('pointermove', (p) => {
-      if (this.joystick.active && p.id === this.joystick.pointerId) {
-        const dx = p.x - this.joystick.baseX;
-        const dy = p.y - this.joystick.baseY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const angle = Math.atan2(dy, dx);
-        const clamped = Math.min(dist, 55);
-        this.joyStick.setPosition(this.joystick.baseX + Math.cos(angle) * clamped, this.joystick.baseY + Math.sin(angle) * clamped);
-        this.joystick.dx = dist > 4 ? Math.cos(angle) : 0;
-        this.joystick.dy = dist > 4 ? Math.sin(angle) : 0;
-      }
-    });
-
-    this.input.on('pointerup', (p) => {
-      if (p.id === this.joystick.pointerId) {
-        this.joystick.active = false; this.joystick.pointerId = null;
-        this.joystick.dx = 0; this.joystick.dy = 0;
-        this.joyBase.setVisible(false); this.joyStick.setVisible(false);
-      }
-    });
-  }
-
-  // ── Hazards ────────────────────────────────────────────────────────────────
-
-  hitByPriest() {
-    if (this.invincible || this.gameOver) return;
-    this.loseLife('BURNED BY HOLY CROSS');
-  }
-
-  hitByGarlicNPC() {
-    if (this.invincible || this.gameOver) return;
-    this.garlicHits++;
-    this.setInvincible(1500);
-    this.cameras.main.shake(200, 0.005);
-    this.player.setTint(0x88ff44);
-    this.time.delayedCall(300, () => this.player.clearTint());
-    if (this.garlicHits >= GARLIC_HITS_PER_LIFE) {
-      this.garlicHits = 0;
-      this.loseLife('GARLIC OVERLOAD');
-    }
-    this.updateUI();
-  }
-
-  collectSyringe(player, syringe) {
-    syringe.destroy();
-    this.syringesCollected++;
-    this.floatText(syringe.x, syringe.y, '+BLOOD', '#ff2222');
-    if (this.garlicHits > 0) this.garlicHits = Math.max(0, this.garlicHits - 1);
-    this.updateUI();
-  }
-
-  reachShelter() {
-    if (this.gameOver) return;
-    this.triggerNightComplete();
-  }
-
-  // ── Lives ──────────────────────────────────────────────────────────────────
-
-  loseLife(reason) {
-    this.lives--;
-    this.livesLost++;
-    this.setInvincible(2000);
-    this.cameras.main.shake(300, 0.012);
-    this.cameras.main.flash(200, 150, 0, 0);
-    this.updateUI();
-    if (this.lives <= 0) this.triggerLose(reason);
-  }
-
-  setInvincible(ms) {
-    this.invincible = true;
-    this.tweens.add({ targets: this.player, alpha: 0.3, duration: 100, yoyo: true, repeat: Math.floor(ms / 200) });
-    this.time.delayedCall(ms, () => { this.invincible = false; this.player.setAlpha(1); });
-  }
-
-  // ── Timer & sunlight ───────────────────────────────────────────────────────
-
-  tickTimer() {
-    if (this.gameOver) return;
-    this.timeLeft = Math.max(0, this.timeLeft - 1);
-    this.updateUI();
-    this.updateSunlight();
-    if (this.timeLeft <= 0) this.triggerLose('SUNRISE — YOU BURN');
-  }
-
-  updateSunlight() {
-    const elapsed = this.effectiveDuration - this.timeLeft;
-    this.sunlightHeight = (elapsed / this.effectiveDuration) * MAP_H;
-    this.sunlightGraphic.clear();
-    if (this.sunlightHeight > 0) {
-      for (let i = 0; i < 8; i++) {
-        this.sunlightGraphic.fillStyle(0xff8800, 0.1 + (i / 8) * 0.45);
-        this.sunlightGraphic.fillRect(0, i * (this.sunlightHeight / 8), MAP_W, this.sunlightHeight / 8 + 1);
-      }
-      this.sunlightGraphic.fillStyle(0xffaa00, 0.6);
-      this.sunlightGraphic.fillRect(0, this.sunlightHeight - 4, MAP_W, 4);
-    }
-    if (!this.invincible && this.player.y < this.sunlightHeight) this.loseLife('CAUGHT IN SUNLIGHT');
-  }
-
-  // ── End states ─────────────────────────────────────────────────────────────
-
-  calculateNightScore() {
-    let s = this.nightNumber * 500;          // night completion bonus
-    s += this.timeLeft * 15;
-    s += this.syringesCollected * 300;
-    s += this.glamouredEver * 150;
-    s -= this.livesLost * 200;
-    return Math.max(0, s);
-  }
-
-  triggerNightComplete() {
-    this.gameOver = true;
-    this.player.setVelocity(0, 0);
-    this.cameras.main.flash(500, 100, 100, 0);
-
-    const nightScore = this.calculateNightScore();
-    const total      = this.accumulatedScore + nightScore;
-
-    this.add.text(GAME_W / 2, GAME_H / 2,
-      'NIGHT ' + this.nightNumber + '\nSURVIVED\n+' + nightScore, {
-        fontFamily: 'Georgia, serif', fontSize: '30px', color: '#ffdd44',
-        stroke: '#000', strokeThickness: 5, align: 'center',
-      }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5);
-
-    this.time.delayedCall(1800, () => {
-      this.scene.start('Game', {
-        nightNumber:      this.nightNumber + 1,
-        accumulatedScore: total,
-        lives:            this.lives,
-      });
-    });
-  }
-
-  triggerLose(reason) {
-    this.gameOver = true;
-    this.player.setVelocity(0, 0);
-    this.player.setTint(0xff4400);
-    this.cameras.main.shake(400, 0.02);
-    this.cameras.main.flash(300, 150, 30, 0);
-    this.add.text(GAME_W / 2, GAME_H / 2, 'YOU PERISH\n' + reason, {
-      fontFamily: 'Georgia, serif', fontSize: '28px', color: '#ff2222',
-      stroke: '#000', strokeThickness: 4, align: 'center',
-    }).setScrollFactor(0).setDepth(20).setOrigin(0.5, 0.5);
-    const total = this.accumulatedScore + this.calculateNightScore();
-    this.time.delayedCall(1800, () =>
-      this.scene.start('Score', { score: total, nights: this.nightNumber })
+    this.checkpoint = Save.run();
+    button(
+      this,
+      195,
+      684,
+      342,
+      this.checkpoint ? `CONTINUE · NIGHT ${this.checkpoint.nightNumber} →` : "START THE CAMPAIGN →",
+      () => this.startRun(),
+      true,
+    );
+    if (this.checkpoint) button(this, 195, 742, 342, "START A NEW HUNT", () => this.startRun(false));
+    else label(this, 195, 737, "Crypts save your place between nights.", 12, "#a9bac8").setOrigin(0.5);
+    this.soundButton = button(this, 105, 805, 158, "", () =>
+      this.toggleSound(),
+    );
+    this.motionButton = button(this, 280, 805, 166, "", () =>
+      this.toggleMotion(),
+    );
+    this.refreshSettings();
+    this.starting = false;
+    onKey(this, "keydown-ENTER", () => this.startRun());
+    onKey(this, "keydown-SPACE", () => this.startRun());
+    announce(
+      "Vamp Runner. Reach the crypt before sunrise. Press Enter to start.",
     );
   }
-
-  // ── Update loop ────────────────────────────────────────────────────────────
-
-  update(time, delta) {
-    if (this.gameOver) { this.player.setVelocity(0, 0); return; }
-
-    const { dx, dy } = this.joystick;
-    if (dx !== 0 || dy !== 0) {
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      this.player.setVelocity((dx / len) * PLAYER_SPEED, (dy / len) * PLAYER_SPEED);
-      this.player.setFlipX(dx < 0);
-    } else {
-      this.player.setVelocity(0, 0);
-    }
-
-    this.updateNPCs(delta);
+  refreshSettings() {
+    this.soundButton.caption.setText(
+      "SOUND " + (preferences.sound ? "ON" : "OFF"),
+    );
+    this.motionButton.caption.setText(
+      "MOTION " + (preferences.reducedMotion ? "REDUCED" : "FULL"),
+    );
+  }
+  toggleSound() {
+    preferences.sound = !preferences.sound;
+    Save.write("vampRunnerSettings", preferences);
+    this.refreshSettings();
+    if (preferences.sound) Sfx.play("key"); else Sfx.stop();
+  }
+  toggleMotion() {
+    preferences.reducedMotion = !preferences.reducedMotion;
+    Save.write("vampRunnerSettings", preferences);
+    this.refreshSettings();
+  }
+  startRun(resume = true) {
+    if (this.starting) return;
+    this.starting = true;
+    Sfx.play("glamour");
+    const checkpoint = resume ? this.checkpoint : null;
+    if (!checkpoint) Save.write("vampRunnerCampaign", null);
+    this.scene.start(checkpoint ? "Bat" : "Game", { seed: Math.floor(Math.random() * 0xffffffff), ...checkpoint, profile: Save.progress() });
   }
 }
 
-// ─── SCORE SCENE ─────────────────────────────────────────────────────────────
+class GameScene extends Phaser.Scene {
+  constructor() { super("Game"); }
+  init(data = {}) { this.runData = data; }
+  create() {
+    // Phaser reuses scene instances. Reset every piece of transient state.
+    this.world = createWorld({ ...this.runData, profile: this.runData.profile ?? Save.progress() });
+    Sfx.setTheme(this.world.level.themeKey);
+    this.paused = false;
+    this.transitioning = false;
+    this.pending = {};
+    this.held = new Map();
+    this.glamourHeld = new Set();
+    this.accumulator = 0;
+    this.messageUntil = this.world.level.oneWay ? 5 : 3;
+    this.pauseObjects = [];
+    this.warningUntil = 0;
+    this.time.paused = false;
+    this.tweens.resumeAll();
+    this.cameras.main.setBounds(0, 0, this.world.level.width, GAME_H);
+    this.cameras.main.setScroll(0, 0);
+    this.drawCity();
+    this.drawLevel();
+    this.player = this.add.image(80, FLOOR, "player").setOrigin(0.5, 1).setDisplaySize(44, 47).setDepth(10);
+    this.targetGraphic = this.add.graphics().setDepth(11);
+    this.buildHUD();
+    this.buildControls();
+    this.onBlur = () => this.pauseGame();
+    this.onVisibility = () => { if (document.hidden) this.pauseGame(); };
+    window.addEventListener("blur", this.onBlur);
+    document.addEventListener("visibilitychange", this.onVisibility);
+    this.events.once("shutdown", () => {
+      window.removeEventListener("blur", this.onBlur);
+      document.removeEventListener("visibilitychange", this.onVisibility);
+      this.resetInput();
+      Sfx.stop();
+    });
+    this.renderWorld();
+    this.message.setText(`${this.world.level.name}\n${Math.ceil(this.world.timeLeft)}s until sunrise · ${this.world.level.requiredKeys} crypt keys${this.world.level.theme.underground ? "\nOnly your sealed crypt stops the dawn curse." : this.world.level.oneWay ? "\nOne way: gates seal behind you." : ""}`);
+    announce(`Night ${this.world.night}: ${this.world.level.name}. Find ${this.world.level.requiredKeys} crypt keys before sunrise.${this.world.level.oneWay ? " Gates seal behind you when you enter the next section." : ""}`);
+  }
+  fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
+  drawCity() {
+    const sky = this.fixed(this.add.graphics(), -10);
+    const theme = this.world.level.theme;
+    sky.fillGradientStyle(0x101322, 0x101322, theme.sky, theme.sky, 1);
+    sky.fillRect(0, 0, GAME_W, GAME_H);
+    if (theme.underground) { this.drawUnderground(theme); return; }
+    for (let i = 0; i < 40; i++) {
+      sky.fillStyle(C.cream, 0.25 + (i % 4) * 0.1);
+      sky.fillRect((i * 83 + 17) % GAME_W, 170 + (i * 39) % 270, 1, 1);
+    }
+    sky.fillStyle(0xd9d4bf); sky.fillCircle(284, 250, 33);
+    sky.fillStyle(0x1b1b2b); sky.fillCircle(296, 240, 30);
+    this.dawn = this.fixed(this.add.rectangle(195, 422, 390, 844, 0xf5a568, 0), -8);
+    for (let layer = 0; layer < 2; layer++) {
+      const g = this.add.graphics().setScrollFactor(layer ? 0.45 : 0.2).setDepth(-6 + layer);
+      for (let i = 0; i < Math.ceil(this.world.level.width * 0.5 / 86) + 6; i++) {
+        const x = i * 86, h = 80 + ((i * 37 + layer * 47) % 170), y = FLOOR - h;
+        g.fillStyle(layer ? theme.stone : 0x252b3b);
+        if (theme.motif === "trees") {
+          g.fillRect(x + 34, y, 9, h);
+          g.lineStyle(7, theme.stone); g.lineBetween(x + 38, y + 60, x + 9, y + 24); g.lineBetween(x + 38, y + 83, x + 72, y + 35);
+          g.fillCircle(x + 25, y + 14, 30); g.fillCircle(x + 57, y + 30, 24);
+          continue;
+        }
+        g.fillRect(x, y, 80, h + 10);
+        g.fillTriangle(x - 5, y, x + 40, y - 28, x + 85, y);
+        if (theme.motif === "spires") g.fillTriangle(x + 24, y, x + 40, y - 75, x + 56, y);
+        if (theme.motif === "awnings") {
+          for (let stripe = 0; stripe < 5; stripe++) {
+            g.fillStyle(stripe % 2 ? 0x9b5569 : 0x968270, 0.7); g.fillRect(x + stripe * 16, y + h - 40, 16, 13);
+          }
+        }
+        g.fillStyle(C.gold, layer ? 0.25 : 0.1);
+        for (let row = 0; row < Math.floor(h / 35); row++) {
+          g.fillRect(x + 19, y + 18 + row * 35, 8, 13);
+          g.fillRect(x + 53, y + 18 + row * 35, 8, 13);
+        }
+      }
+    }
+  }
+  drawUnderground(theme) {
+    const back = this.add.graphics().setScrollFactor(0.3).setDepth(-6);
+    for (let x = -60; x < this.world.level.width * 0.4 + 500; x += 170) {
+      back.fillStyle(theme.stone); back.fillRoundedRect(x, 205, 144, 440, 65);
+      back.fillStyle(theme.sky); back.fillRoundedRect(x + 15, 226, 114, 418, 53);
+      back.lineStyle(2, theme.trim, 0.2);
+      for (let y = 310; y < FLOOR; y += 42) back.lineBetween(x, y, x + 14, y);
+      if (theme.motif === "crypts") {
+        for (let y = 335; y < 570; y += 66) {
+          back.fillStyle(0x665f53); back.fillRoundedRect(x + 45, y, 48, 29, 10);
+          back.fillStyle(0xb9ab8a); back.fillCircle(x + 69, y + 11, 7);
+          back.fillStyle(0x15151c); back.fillCircle(x + 66, y + 10, 2); back.fillCircle(x + 72, y + 10, 2);
+        }
+      } else {
+        back.fillStyle(0x537371); back.fillRect(x + 32, 265, 80, 11);
+        back.fillRect(x + 102, 265, 10, 325);
+        back.lineStyle(3, 0x99a47c, 0.55); back.strokeCircle(x + 107, 400, 17);
+      }
+      back.fillStyle(0xe3bb73, 0.09); back.fillCircle(x + 18, 300, 38);
+      back.fillStyle(0xf0c57c, 0.85); back.fillRect(x + 14, 291, 8, 16);
+    }
+    const ceiling = this.fixed(this.add.graphics(), -5);
+    ceiling.fillStyle(0x0b1119); ceiling.fillRect(0, 144, GAME_W, 48);
+    for (let x = 0; x < GAME_W; x += 39) ceiling.fillTriangle(x, 187, x + 16, 211 + x % 17, x + 37, 187);
+    this.dawn = this.fixed(this.add.graphics(), -4);
+    this.dawn.fillStyle(0xeab774, 0.4);
+    this.dawn.fillTriangle(95, 197, 120, FLOOR, 171, FLOOR);
+    this.dawn.fillTriangle(310, 197, 252, FLOOR, 294, FLOOR);
+  }
+  drawLevel() {
+    const level = this.world.level, g = this.add.graphics().setDepth(1);
+    for (const p of level.platforms) {
+      if (p.motion || p.crumble) continue;
+      if (p.bonus) {
+        // A cache balcony must leave the lower route visible beneath it.
+        g.fillStyle(0x364553); g.fillRoundedRect(p.x, p.y, p.w, 14, 3);
+        g.fillStyle(level.theme.trim); g.fillRect(p.x, p.y, p.w, 4);
+        g.lineStyle(3, 0x927b5c);
+        g.lineBetween(p.x + 8, p.y + 14, p.x + 25, p.y + 28);
+        g.lineBetween(p.x + p.w - 8, p.y + 14, p.x + p.w - 25, p.y + 28);
+        continue;
+      }
+      if (!p.ground && p.skin !== "brick") {
+        if (p.skin === "branch") {
+          g.fillStyle(0x65564a); g.fillRoundedRect(p.x, p.y, p.w, 13, 5);
+          g.lineStyle(4, 0x65564a); g.lineBetween(p.x + p.w * 0.25, p.y + 12, p.x + p.w * 0.5, p.y + 55);
+          g.fillStyle(0x91a879); g.fillRect(p.x, p.y, p.w, 3);
+          for (let x = p.x + 12; x < p.x + p.w; x += 32) g.fillEllipse(x, p.y + 15, 18, 7);
+        } else if (p.skin === "awning") {
+          g.fillStyle(0x786150); g.fillRect(p.x + 9, p.y + 10, 5, FLOOR - p.y - 10); g.fillRect(p.x + p.w - 14, p.y + 10, 5, FLOOR - p.y - 10);
+          for (let x = p.x, stripe = 0; x < p.x + p.w; x += 22, stripe++) {
+            g.fillStyle(stripe % 2 ? 0xc7ac88 : 0xa24e67); g.fillRect(x, p.y, Math.min(22, p.x + p.w - x), 15);
+          }
+          g.fillStyle(0xe0c8a3); g.fillRect(p.x, p.y, p.w, 3);
+        } else if (p.skin === "stone" || p.skin === "bone") {
+          g.fillStyle(level.theme.stone); g.fillRect(p.x + p.w * 0.27, p.y + 13, p.w * 0.46, FLOOR - p.y - 13);
+          g.fillStyle(0x56606b); g.fillRect(p.x, p.y, p.w, 16);
+          g.fillStyle(level.theme.trim); g.fillRect(p.x, p.y, p.w, 4);
+          if (p.skin === "bone") {
+            g.fillStyle(0xc7b998, 0.75);
+            for (let x = p.x + 12; x < p.x + p.w - 6; x += 25) { g.fillCircle(x, p.y + 9, 3); g.fillRect(x - 2, p.y + 10, 4, 4); }
+          }
+        } else if (p.skin === "pipe") {
+          g.fillStyle(0x355d5e); g.fillRoundedRect(p.x, p.y, p.w, 18, 8);
+          g.fillStyle(0x94b4a5); g.fillRect(p.x + 4, p.y, p.w - 8, 4);
+          g.lineStyle(3, 0x748a7c); g.lineBetween(p.x + 12, p.y, p.x + 12, p.y + 18); g.lineBetween(p.x + p.w - 12, p.y, p.x + p.w - 12, p.y + 18);
+        } else {
+          g.fillStyle(p.skin === "pier" ? 0x527f86 : 0x847060); g.fillRect(p.x, p.y, p.w, 14);
+          g.fillStyle(p.skin === "pier" ? 0xafd1cd : 0xd0b796); g.fillRect(p.x, p.y, p.w, 3);
+          g.lineStyle(2, 0x756f62, 0.6);
+          for (const x of [p.x + 10, p.x + p.w - 10]) g.lineBetween(x, p.y + 14, x, p.skin === "pier" ? FLOOR + 32 : p.y + 38);
+          for (let x = p.x + 12; x < p.x + p.w - 5; x += 22) g.lineBetween(x, p.y + 4, x, p.y + 13);
+        }
+        continue;
+      }
+      g.fillStyle(p.ground ? level.theme.stone : 0x18232e);
+      g.fillRect(p.x, p.y, p.w, p.ground ? 120 : FLOOR - p.y);
+      g.fillStyle(level.theme.trim);
+      g.fillRect(p.x, p.y, p.w, 4);
+      g.lineStyle(1, 0x43525b, 0.45);
+      for (let x = p.x + 12; x < p.x + p.w - 10; x += 32) {
+        if (p.ground) g.lineBetween(x, p.y + 8, x + 8, p.y + 8);
+        else {
+          g.fillStyle(C.gold, 0.18);
+          g.fillRoundedRect(x, p.y + 24, 13, 24, 6);
+        }
+      }
+    }
+    for (const gap of level.gaps) {
+      g.fillStyle(0x060a12); g.fillRect(gap.x, FLOOR + 5, gap.width, 108);
+      if (gap.water) {
+        g.fillStyle(0x2a6579, 0.6); g.fillRect(gap.x, FLOOR + 18, gap.width, 100);
+        g.lineStyle(1, 0x73b9c6, 0.6);
+        for (let x = gap.x + 8; x < gap.x + gap.width - 18; x += 35) g.lineBetween(x, FLOOR + 26, x + 18, FLOOR + 26);
+      }
+      g.fillStyle(C.red, 0.85); g.fillTriangle(gap.x - 12, FLOOR - 8, gap.x + 5, FLOOR, gap.x - 12, FLOOR + 8); g.fillTriangle(gap.x + gap.width + 12, FLOOR - 8, gap.x + gap.width - 5, FLOOR, gap.x + gap.width + 12, FLOOR + 8);
+      label(this, gap.x + gap.width / 2, FLOOR + 37, "↓", 17, "#c9758a").setOrigin(0.5);
+    }
+    const crypt = level.crypt;
+    g.fillStyle(0x35464b); g.fillRect(crypt.x - 60, FLOOR - 108, 120, 108);
+    g.fillStyle(0x61746d); g.fillTriangle(crypt.x - 72, FLOOR - 108, crypt.x, FLOOR - 153, crypt.x + 72, FLOOR - 108);
+    g.fillStyle(0x091c19); g.fillRoundedRect(crypt.x - 34, FLOOR - 92, 68, 92, 30);
+    this.cryptDoor = this.add.image(crypt.x, FLOOR - 40, "shelter").setDisplaySize(55, 72).setDepth(2);
+    label(this, crypt.x, FLOOR - 174, "YOUR CRYPT", 13, "#90d9bf", true).setOrigin(0.5);
+    this.pickups = level.pickups.map((p) => {
+      const size = p.kind === "dirt" ? p.value >= 5 ? 34 : 22 : 34;
+      return this.add.image(p.x, p.y, p.kind).setDepth(5).setDisplaySize(size, size);
+    });
+    this.pickupValues = level.pickups.map((p) => p.kind === "dirt" && p.value > 1 ? label(this, p.x, p.y - 26, `+${p.value}`, 11, "#f4d798", true).setOrigin(0.5).setDepth(6) : null);
+    this.hazardSprites = level.hazards.map((h) => this.add.image(h.x, h.y, h.kind).setDepth(6).setDisplaySize(36, 40));
+    this.humans = level.humans.map((h) => this.add.image(h.x, h.y + h.h, "npc_plain").setOrigin(0.5, 1).setDisplaySize(38, 42).setDepth(7));
+    this.priestLabels = level.humans.map(h => h.behavior === "priest" ? label(this, h.x, h.y - 50, "", 10, "#dfb778", true).setOrigin(0.5).setDepth(12) : null);
+    this.dynamicGraphic = this.add.graphics().setDepth(3);
+    this.gateGraphic = this.add.graphics().setDepth(8);
+    this.gateLabels = level.gates.map((gate) => label(this, gate.x, 316, "", 12, "#dfb778", true).setOrigin(0.5).setDepth(9));
+    level.sections.forEach((section) => {
+      label(this, section.start + 100, 277, section.name, 12, "#c6bbab", true);
+      g.lineStyle(2, 0x8a9696, 0.7); g.lineBetween(section.start + 80, FLOOR - 48, section.start + 80, FLOOR);
+      g.fillStyle(0x629c90, 0.8); g.fillTriangle(section.start + 82, FLOOR - 48, section.start + 105, FLOOR - 41, section.start + 82, FLOOR - 33);
+    });
+  }
+  buildHUD() {
+    this.fixed(this.add.rectangle(195, 72, 390, 144, C.ink, 0.97));
+    this.fixed(label(this, 20, 19, `NIGHT ${String(this.world.night).padStart(2, "0")}${this.world.night <= 12 ? "/12" : " · BLOOD MOON"}`, 12, "#dfb778", true));
+    this.clock = this.fixed(label(this, 370, 18, "", 15, "#eee5d3", true).setOrigin(1, 0));
+    this.fixed(this.add.rectangle(20, 54, 350, 4, C.line).setOrigin(0, 0.5));
+    this.sunBar = this.fixed(this.add.rectangle(20, 54, 350, 4, C.gold).setOrigin(0, 0.5));
+    this.sunMarker = this.fixed(this.add.circle(20, 54, 6, C.gold));
+    this.fixed(label(this, 20, 68, "COFFINS", 10, "#a9bac8", true));
+    this.coffins = [0, 1, 2].map((i) => this.fixed(this.add.image(30 + i * 29, 101, "shelter").setDisplaySize(23, 28)));
+    this.fixed(label(this, 129, 68, "GARLIC HITS", 10, "#a9bac8", true));
+    this.garlic = [0, 1, 2].map((i) => this.fixed(this.add.circle(141 + i * 23, 100, 6, C.line)));
+    this.wallet = this.fixed(label(this, 370, 69, "", 13, "#dfb778", true).setOrigin(1, 0));
+    this.scoreText = this.fixed(label(this, 370, 96, "", 13, "#eee5d3", true).setOrigin(1, 0));
+    this.routeText = this.fixed(label(this, 20, 126, "", 11, "#a9bac8", true));
+    this.keyText = this.fixed(label(this, 20, 157, "", 13, "#90d6f5", true));
+    this.questText = this.fixed(label(this, 20, 184, "", 11, "#c4b28d", true));
+    this.covenText = this.fixed(label(this, 195, 656, "", 11, "#90d9bf", true).setOrigin(0.5));
+    this.message = this.fixed(label(this, 195, 236, "", 15, "#eee5d3").setOrigin(0.5).setWordWrapWidth(350).setAlign("center"));
+    const pause = this.fixed(this.add.rectangle(351, 174, 48, 48, C.ink, 0.9).setStrokeStyle(1, C.line).setInteractive());
+    this.fixed(label(this, 351, 174, "Ⅱ", 21).setOrigin(0.5));
+    pause.on("pointerdown", (_p, _x, _y, event) => { event?.stopPropagation(); this.pauseGame(); });
+    this.fixed(this.add.rectangle(195, 758, 390, 172, C.ink, 0.98));
+    this.hint = this.fixed(label(this, 195, 687, "", 12, "#c4b28d", true).setOrigin(0.5));
+  }
+  buildControls() {
+    this.keys = this.input.keyboard.addKeys("LEFT,RIGHT,A,D,Q,E,J");
+    onKey(this, "keydown", (e) => {
+      if (e.repeat) return;
+      if (["Escape", "KeyP"].includes(e.code)) { this.paused ? this.resumeGame() : this.pauseGame(); return; }
+      if (this.paused || this.transitioning) return;
+      if (["Space", "ArrowUp", "KeyW", "KeyZ"].includes(e.code)) { e.preventDefault?.(); this.pending.jump = true; }
+      if (["KeyF", "KeyK"].includes(e.code)) this.pending.bite = true;
+    });
+    this.input.keyboard.addCapture?.(["SPACE", "UP", "LEFT", "RIGHT"]);
+    this.moveButtons = [];
+    for (const [x, direction, title] of [[49, -1, "←"], [124, 1, "→"]]) {
+      const bg = this.fixed(this.add.rectangle(x, 774, 66, 90, C.panel).setStrokeStyle(1, C.line).setInteractive());
+      this.fixed(label(this, x, 770, title, 31).setOrigin(0.5));
+      this.moveButtons.push({ bg, direction });
+      bg.on("pointerdown", (pointer, _x, _y, event) => {
+        event?.stopPropagation();
+        if (!this.paused && !this.transitioning) this.held.set(pointer.id, direction);
+      });
+      bg.on("pointerout", (pointer) => this.held.delete(pointer.id));
+    }
+    const release = (pointer) => { this.held.delete(pointer.id); this.glamourHeld.delete(pointer.id); };
+    this.input.on("pointerup", release);
+    this.input.on("pointerupoutside", release);
+    this.input.on("gameout", () => { this.held.clear(); this.glamourHeld.clear(); });
+    this.stunButton = button(this, 223, 737, 92, "GLAMOUR", () => {});
+    this.stunButton.bg.on("pointerdown", pointer => { if (!this.paused) { Sfx.unlock(); this.glamourHeld.add(pointer.id); } });
+    this.stunButton.bg.on("pointerout", pointer => this.glamourHeld.delete(pointer.id));
+    this.biteButton = button(this, 329, 737, 92, "BITE · F", () => { if (!this.paused) this.pending.bite = true; });
+    this.jumpButton = button(this, 276, 798, 198, "JUMP ↑", () => { if (!this.paused) this.pending.jump = true; }, true);
+    for (const item of [this.stunButton, this.biteButton, this.jumpButton]) { this.fixed(item.bg); this.fixed(item.caption); }
+    this.events.once("shutdown", () => this.input.removeAllListeners());
+  }
+  resetInput() { this.held?.clear(); this.glamourHeld?.clear(); this.pending = {}; this.input.keyboard.resetKeys(); if (this.world) interruptGlamour(this.world); }
+  pauseGame() {
+    if (this.paused || this.transitioning || this.world.status !== "playing") return;
+    this.paused = true;
+    this.resetInput();
+    Sfx.stop();
+    const add = (o) => { this.pauseObjects.push(this.fixed(o, 90)); return o; };
+    const dim = add(this.add.rectangle(195, 422, 390, 844, C.ink, 0.97).setInteractive());
+    dim.on("pointerdown", (_p, _x, _y, e) => e?.stopPropagation());
+    add(label(this, 195, 228, "THE NIGHT CAN WAIT.", 27).setOrigin(0.5));
+    if (this.world.level.oneWay) add(label(this, 195, 416, "ONE WAY · GATES SEAL BEHIND YOU", 11, "#dfb778", true).setOrigin(0.5));
+    add(label(this, 195, 285, "Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nHold E: glamour · F: bite\nStay still. Face the human.", 15, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(14));
+    const contracts = contractResults(this.world).map((c) => `${c.complete ? "✓" : "○"} ${c.title}: ${c.key === "untouched" ? c.value === 0 ? "on track" : "missed" : c.value + "/" + c.target} (+${c.reward} dirt)`);
+    add(label(this, 195, 440, "OPTIONAL NIGHT CHALLENGES", 11, "#dfb778", true).setOrigin(0.5));
+    add(label(this, 195, 477, contracts.join("\n"), 13, "#dfb778").setOrigin(0.5).setAlign("center").setLineSpacing(8));
+    const resume = button(this, 195, 564, 330, "RESUME THE NIGHT", () => this.resumeGame(), true);
+    const end = button(this, 195, 628, 330, "END RUN", () => this.finishRun("You returned to the shadows."));
+    [resume.bg, resume.caption, end.bg, end.caption].forEach(add);
+    const sound = button(this, 195, 700, 210, `SOUND ${preferences.sound ? "ON" : "OFF"}`, () => {
+      preferences.sound = !preferences.sound; Save.write("vampRunnerSettings", preferences);
+      sound.caption.setText(`SOUND ${preferences.sound ? "ON" : "OFF"}`);
+      if (preferences.sound) Sfx.play("key"); else Sfx.stop();
+    });
+    [sound.bg, sound.caption].forEach(add);
+    announce("Paused. Escape or Resume continues the night.");
+  }
+  resumeGame() {
+    if (!this.paused || this.transitioning) return;
+    this.pauseObjects.forEach((o) => o.destroy()); this.pauseObjects = [];
+    this.resetInput(); this.accumulator = 0; this.paused = false;
+    announce("Resumed.");
+  }
+  saveProgress() {
+    this.progressSaved = Save.write("vampRunnerProgress", this.world.profile);
+    if (!this.progressSaved) announce("Upgrades and grave dirt last for this session; browser storage is unavailable.");
+  }
+  runSnapshot() {
+    const w = this.world;
+    return { nightNumber: w.night, score: w.score, lives: w.lives, seed: w.seed, profile: w.profile, stats: w.stats, timeLeft: w.timeLeft, bonus: w.bonus, contracts: w.contracts, contractReward: w.contractReward };
+  }
+  completeNight() {
+    if (this.transitioning || this.world.status !== "safe") return;
+    this.transitioning = true; this.resetInput(); this.saveProgress();
+    this.scene.start("Crypt", this.runSnapshot());
+  }
+  finishRun(reason = this.world.reason) {
+    if (this.transitioning) return;
+    this.transitioning = true; this.resetInput(); this.saveProgress();
+    Save.write("vampRunnerCampaign", null);
+    this.scene.start("Score", { score: this.world.score, nights: this.world.night - 1, reason, profile: this.world.profile });
+  }
+  showSunrise() {
+    if (this.transitioning) return;
+    this.transitioning = true; this.resetInput(); this.saveProgress();
+    Save.write("vampRunnerCampaign", null);
+    const glow = this.fixed(this.add.rectangle(195, 422, 390, 844, 0xf2b575, 0.65), 80);
+    this.fixed(label(this, 195, 365, "SUNRISE", 45, "#271d25").setOrigin(0.5), 81);
+    this.fixed(label(this, 195, 417, "The night is over.", 20, "#271d25").setOrigin(0.5), 81);
+    if (!preferences.reducedMotion) this.tweens.add({ targets: glow, alpha: 0.94, duration: 900 });
+    this.time.delayedCall(preferences.reducedMotion ? 450 : 1200, () => {
+      this.scene.start("Score", { score: this.world.score, nights: this.world.night - 1, reason: this.world.reason, profile: this.world.profile });
+    });
+  }
+  showEvents() {
+    for (const event of this.world.events.splice(0)) {
+      if (event.kind === "jump") { Sfx.play("jump"); continue; }
+      if (event.kind === "dawn-warning") this.warningUntil = this.world.elapsed + 3;
+      if (event.text && (event.kind === "dawn-warning" || this.world.elapsed >= this.warningUntil)) { this.message.setText(event.text); this.messageUntil = this.world.elapsed + (event.kind === "dawn-warning" ? 3 : 2); }
+      if (["dirt", "stun", "bite"].includes(event.kind)) this.saveProgress();
+      if (!["section", "locked", "gate-locked", "safe"].includes(event.kind)) Sfx.play(event.kind);
+      if (event.kind === "hurt" && !preferences.reducedMotion) this.cameras.main.shake(110, 0.004);
+      if (["bite", "iv", "hurt", "key", "locked", "section", "gate-locked", "gate-sealed", "dawn-warning", "veil", "veil-blocked"].includes(event.kind)) announce(event.text);
+    }
+  }
+  renderWorld() {
+    const w = this.world, p = w.player;
+    this.player.setPosition(p.x, p.y + p.h).setFlipX(p.facing < 0);
+    this.player.setTexture(Math.abs(p.vx) > 10 && p.grounded && Math.floor(w.elapsed * 9) % 2 ? "player_step" : "player");
+    this.player.setAlpha(w.invulnerable > 0 ? (preferences.reducedMotion ? 0.6 : Math.floor(w.elapsed * 12) % 2 ? 0.35 : 1) : 1);
+    if (w.iv > 0) this.player.setTint(0xf6bbcd); else this.player.clearTint();
+    this.cameras.main.scrollX = Math.max(0, Math.min(w.level.width - GAME_W, p.x - 125));
+    this.cameras.main.scrollY = 0;
+    const dawn = dawnState(w), seconds = Math.ceil(w.timeLeft);
+    this.dawn.setAlpha(dawn.glow * 0.7);
+    this.clock.setText(`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} TO SUNRISE`).setColor(dawn.final ? "#ff8295" : dawn.urgent ? "#ffb777" : "#eee5d3");
+    this.sunBar.setScale(Math.max(0, w.timeLeft / w.level.duration), 1);
+    this.sunMarker.setPosition(20 + dawn.fraction * 350, 54);
+    this.coffins.forEach((o, i) => o.setAlpha(i < w.lives ? 1 : 0.18));
+    this.garlic.forEach((o, i) => o.setFillStyle(i < w.garlicHits ? C.red : C.line));
+    this.wallet.setText(`${w.profile.dirt} GRAVE DIRT`);
+    this.scoreText.setText(`${w.score.toLocaleString()} PTS`);
+    this.routeText.setText(w.iv > 0 ? `IV RUSH ${w.iv.toFixed(1)}s · PROTECTED` : `${w.level.theme.name.toUpperCase()} · ${Math.round(p.x / w.level.width * 100)}%${w.level.oneWay ? " · ONE WAY" : ""}`);
+    const nextKey = w.level.pickups.filter((item) => item.kind === "key" && item.active).sort((a, b) => Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
+    this.keyText.setText(nextKey ? `KEYS ${w.keys}/${w.level.requiredKeys} · ${nextKey.x < p.x ? "←" : "→"} ${Math.ceil(Math.abs(nextKey.x - p.x) / 10)}m${nextKey.y < p.y - 30 ? " ↑" : ""}` : `CRYPT OPEN · → ${Math.max(0, Math.ceil((w.level.crypt.x - p.x) / 10))}m`);
+    this.questText.setText(`TURN ${w.stats.turned}/${w.level.contracts[0].target} · DIRT ${w.stats.dirt}/${w.level.contracts[1].target}`);
+    this.covenText.setText(`${w.stats.turned} TURNED · ${w.veil ? "SHADOW VEIL READY" : `${w.feeds}/3 BITES → SHADOW VEIL`}`);
+    this.cryptDoor.setAlpha(nextKey ? 0.45 : 1);
+    this.message.setAlpha(w.elapsed < this.messageUntil ? 1 : 0);
+    w.level.pickups.forEach((pickup, i) => {
+      const sprite = this.pickups[i];
+      sprite.setVisible(pickup.active);
+      sprite.setPosition(pickup.x, pickup.y + (preferences.reducedMotion ? 0 : Math.sin(w.elapsed * 3 + i) * 3));
+      this.pickupValues[i]?.setVisible(pickup.active).setPosition(pickup.x, pickup.y - 26);
+    });
+    this.targetGraphic.clear();
+    if (w.veil) { this.targetGraphic.lineStyle(2, C.mint, 0.7); this.targetGraphic.strokeEllipse(p.x, p.y + p.h / 2, 44, 60); }
+    if (w.focus) {
+      this.targetGraphic.fillStyle(C.ink, 0.9); this.targetGraphic.fillRect(p.x - 27, p.y - 18, 54, 6);
+      this.targetGraphic.fillStyle(C.mint); this.targetGraphic.fillRect(p.x - 27, p.y - 18, 54 * w.focus.elapsed / w.focus.duration, 6);
+    }
+    this.renderEncounters();
+    w.level.humans.forEach((h, i) => {
+      const sprite = this.humans[i];
+      sprite.setPosition(h.x, h.y + h.h).setFlipX(h.direction < 0).setTexture(h.state === "vampire" ? "npc_glamoured" : h.behavior === "priest" ? "npc_priest" : h.behavior === "hunter" ? "npc_garlic" : "npc_plain");
+      if (h.state === "stunned") {
+        this.targetGraphic.lineStyle(2, C.gold, 0.8); this.targetGraphic.strokeEllipse(h.x, h.y - 9, 28, 9);
+      }
+      if (h.state === "human" && h.windup > 0) {
+        this.targetGraphic.lineStyle(2, C.gold); this.targetGraphic.strokeCircle(h.x, h.y - 12, 10);
+        this.targetGraphic.fillStyle(C.gold); this.targetGraphic.fillRect(h.x - 1, h.y - 18, 2, 8);
+      }
+      if (h.state === "human" && h.behavior === "priest") {
+        const phase = pulseState(w.elapsed, 3.8, h.phase);
+        const crossX = h.x + h.direction * 23, crossY = h.y + (phase === "safe" ? 9 : -19);
+        this.targetGraphic.fillStyle(phase === "active" ? 0xffe7a6 : C.gold);
+        this.targetGraphic.fillRect(crossX - 3, crossY, 6, 30); this.targetGraphic.fillRect(crossX - 12, crossY + 7, 24, 6);
+        this.targetGraphic.lineStyle(2, C.gold, phase === "safe" ? 0.16 : 0.9);
+        this.targetGraphic.strokeEllipse(h.x, h.y + 8, 100, 75);
+        if (phase === "active") { this.targetGraphic.fillStyle(C.gold, 0.28); this.targetGraphic.fillEllipse(h.x, h.y + 8, 100, 75); }
+        this.priestLabels[i].setText(phase === "safe" ? "CROSS LOWERED" : phase === "warning" ? "RAISING CROSS" : "CROSS RAISED").setPosition(h.x, h.y - 48);
+      }
+      this.priestLabels[i]?.setVisible(h.state === "human");
+    });
+    const nearby = targetHuman(w), biteTarget = targetHuman(w, 30, true);
+    const section = sectionAt(w.level, p.x);
+    const nextGate = w.level.gates.find((gate) => gate.x > p.x && gate.x - p.x < 210);
+    const gateHint = nextGate ? gateState(w, nextGate) === "locked" ? "KEY FIRST · THE GATE IS LOCKED" : "NO RETURN · CROSS TO SEAL THIS SECTION" : null;
+    this.hint.setText(w.focus ? "HOLD GLAMOUR · DON'T MOVE" : biteTarget ? `BITE NOW · ${biteTarget.stunned.toFixed(1)}s` : nearby?.state === "stunned" ? "GET CLOSER · BITE BEFORE THEY WAKE" : nearby?.behavior === "priest" && pulseState(w.elapsed, 3.8, nearby.phase) !== "safe" ? "CROSS RAISED · GLAMOUR BLOCKED" : nearby ? "FACE THEM · HOLD GLAMOUR · +2 DIRT" : gateHint || section.hint);
+    this.stunButton.bg.setAlpha(canGlamour(w, nearby) && w.stunCooldown === 0 ? 1 : 0.5);
+    this.biteButton.bg.setAlpha(biteTarget ? 1 : 0.5);
+    this.moveButtons.forEach(({ bg, direction }) => bg.setFillStyle([...this.held.values()].includes(direction) ? 0x384756 : C.panel));
+  }
+  renderEncounters() {
+    const w = this.world, g = this.dynamicGraphic;
+    g.clear();
+    const gates = this.gateGraphic;
+    gates.clear();
+    w.level.gates.forEach((gate, i) => {
+      const state = gateState(w, gate), color = state === "sealed" ? C.red : state === "locked" ? 0x90d6f5 : C.gold;
+      // Full-height bars make the boundary visible while standing or jumping.
+      if (state !== "open") {
+        gates.fillStyle(color, 0.16); gates.fillRect(gate.x - GATE_HALF_WIDTH, 208, GATE_HALF_WIDTH * 2, FLOOR - 208);
+        gates.lineStyle(3, color, 0.9);
+        for (const x of [-GATE_HALF_WIDTH, 0, GATE_HALF_WIDTH]) gates.lineBetween(gate.x + x, 208, gate.x + x, FLOOR);
+        for (let y = 218; y < FLOOR; y += 38) gates.lineBetween(gate.x - GATE_HALF_WIDTH, y, gate.x + GATE_HALF_WIDTH, y);
+      }
+      gates.fillStyle(color, 0.9); gates.fillRect(gate.x - 27, FLOOR - 5, 54, 5);
+      gates.lineStyle(2, color, 0.65); gates.lineBetween(gate.x - 9, FLOOR - 24, gate.x + 9, FLOOR - 15); gates.lineBetween(gate.x + 9, FLOOR - 15, gate.x - 9, FLOOR - 6);
+      gates.fillStyle(C.ink, 0.95); gates.fillRoundedRect(gate.x - 67, 303, 134, 27, 3);
+      this.gateLabels[i].setText(state === "sealed" ? "SEALED" : state === "locked" ? "KEY FIRST" : "NO RETURN →").setColor(state === "sealed" ? "#f18599" : state === "locked" ? "#90d6f5" : "#dfb778");
+    });
+    for (const p of w.level.platforms) {
+      if (!p.motion && !p.crumble) continue;
+      if (p.motion?.axis === "y") {
+        g.lineStyle(2, 0xa99165, 0.5);
+        for (const x of [p.x + 9, p.x + p.w - 9]) g.lineBetween(x, p.baseY - p.motion.range - 42, x, p.baseY + p.motion.range + 20);
+        g.lineStyle(2, C.gold); g.strokeCircle(p.x + p.w / 2, p.baseY - p.motion.range - 24, 10);
+      }
+      if (!p.active) { g.lineStyle(1, C.muted, 0.2); g.lineBetween(p.x, p.y, p.x + p.w, p.y); continue; }
+      g.fillStyle(p.motion ? 0x427889 : p.crumbleTime > 0 ? 0xa77366 : 0x887d79);
+      g.fillRect(p.x, p.y, p.w, 12);
+      g.fillStyle(p.motion ? 0x9ed1d9 : 0xc8b39e); g.fillRect(p.x, p.y, p.w, 3);
+      if (p.crumble) {
+        g.lineStyle(2, 0x352e36); g.lineBetween(p.x + 30, p.y, p.x + 44, p.y + 10); g.lineBetween(p.x + 44, p.y + 10, p.x + 58, p.y + 2);
+        if (p.crumbleTime > 0) { g.fillStyle(C.red); g.fillRect(p.x, p.y + 14, p.w * Math.max(0, 1 - p.crumbleTime / 0.9), 3); }
+      } else {
+        g.lineStyle(2, 0x70a6b2); g.lineBetween(p.x + 8, p.y, p.x + 8, p.y - 15); g.lineBetween(p.x + p.w - 8, p.y, p.x + p.w - 8, p.y - 15);
+      }
+    }
+    w.level.hazards.forEach((h, i) => {
+      if (!h.pulse) return;
+      const phase = pulseState(w.elapsed, h.period, h.phase);
+      if (h.visual === "vent") {
+        this.hazardSprites[i].setVisible(false);
+        g.fillStyle(0x69867b); g.fillRect(h.x - 24, FLOOR - 7, 48, 7);
+        g.lineStyle(2, C.ink); for (let x = h.x - 19; x < h.x + 24; x += 8) g.lineBetween(x, FLOOR - 7, x, FLOOR);
+        if (phase !== "safe") {
+          g.fillStyle(0xb5cd87, phase === "active" ? 0.6 : 0.15);
+          for (let j = 0; j < 4; j++) g.fillEllipse(h.x + (j % 2 ? 5 : -5), FLOOR - 17 - j * 21, 36 + j * 3, 24);
+        }
+        return;
+      }
+      this.hazardSprites[i].setAlpha(phase === "safe" ? 0.18 : phase === "warning" ? 0.65 : 1);
+      if (phase !== "safe") {
+        this.targetGraphic.lineStyle(1, C.gold, 0.8); this.targetGraphic.strokeRect(h.x - h.w / 2, h.y - h.h / 2, h.w, h.h);
+        this.targetGraphic.fillStyle(C.gold, phase === "active" ? 0.5 : 0.08); this.targetGraphic.fillRect(h.x - h.w / 2, h.y - h.h / 2, h.w, h.h);
+      }
+    });
+    for (const shot of w.projectiles) {
+      this.targetGraphic.fillStyle(0xeee1bb); this.targetGraphic.fillCircle(shot.x, shot.y + 7, 7);
+      this.targetGraphic.lineStyle(2, 0x95bb7f); this.targetGraphic.lineBetween(shot.x, shot.y + 2, shot.x + 2, shot.y - 5);
+    }
+  }
+  update(_time, delta) {
+    if (this.paused || this.transitioning) return;
+    const key = (name) => this.keys[name]?.isDown;
+    const move = Math.max(-1, Math.min(1, (key("RIGHT") || key("D") ? 1 : 0) - (key("LEFT") || key("A") || key("Q") ? 1 : 0) + [...this.held.values()].reduce((a, b) => a + b, 0)));
+    const frameSeconds = Math.max(0, delta / 1000);
+    // Physics work is capped during a slow frame; the sunrise deadline is not.
+    advanceClock(this.world, Math.max(0, frameSeconds - 0.05));
+    this.accumulator += Math.min(frameSeconds, 0.05);
+    while (this.accumulator >= STEP) {
+      step(this.world, { move, stun: key("E") || key("J") || this.glamourHeld.size > 0, ...this.pending }, STEP);
+      this.pending = {}; this.accumulator -= STEP;
+    }
+    if (this.world.status === "playing") Sfx.tick(this.world.level.duration - this.world.timeLeft, this.world.timeLeft);
+    this.showEvents(); this.renderWorld();
+    if (this.world.status === "safe") this.completeNight();
+    else if (this.world.status === "dead") this.showSunrise();
+  }
+}
+
+class BatScene extends Phaser.Scene {
+  constructor() { super("Bat"); }
+  init(data = {}) { this.runData = data; }
+  fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
+  create() {
+    this.flight = VampBat.createFlight(this.runData);
+    this.paused = false; this.transitioning = false; this.accumulator = 0;
+    this.held = new Set(); this.pauseObjects = []; this.windowShown = false;
+    Sfx.setTheme("roofs");
+    this.cameras.main.setBounds(0, 0, this.flight.width + 100, GAME_H); this.cameras.main.setScroll(0, 0);
+    const sky = this.fixed(this.add.graphics(), -10);
+    sky.fillGradientStyle(0x111524, 0x111524, 0x423b57, 0x423b57, 1); sky.fillRect(0, 0, GAME_W, GAME_H);
+    sky.fillStyle(0xe1d6b8); sky.fillCircle(286, 280, 32);
+    for (let i = 0; i < 30; i++) { sky.fillStyle(C.cream, 0.4); sky.fillRect((i*83)%390, 205+(i*47)%330, 1, 1); }
+    this.dawn = this.fixed(this.add.rectangle(195, 422, 390, 844, 0xf5a568, 0), -8);
+    this.scenery = this.add.graphics().setDepth(1); this.batGraphic = this.add.graphics().setDepth(8);
+    const f = this.flight;
+    this.resident = this.add.image(f.window.x + 28, f.window.y + 18, "npc_plain").setDisplaySize(37, 44).setDepth(4);
+    this.fixed(this.add.rectangle(195, 93, 390, 186, C.ink, 0.96));
+    this.fixed(label(this, 20, 21, `NIGHT ${f.night} · BAT FLIGHT`, 12, "#dfb778", true));
+    this.clock = this.fixed(label(this, 20, 53, "", 18, "#eee5d3", true));
+    this.statusText = this.fixed(label(this, 20, 89, "", 11, "#90d9bf", true));
+    this.phaseText = this.fixed(label(this, 195, 132, "Reach the open window.", 20).setOrigin(0.5));
+    this.note = this.fixed(label(this, 195, 166, "Hold to rise. Release to descend.", 12, "#acbdc9").setOrigin(0.5));
+    this.concern = this.fixed(label(this, 195, 240, "", 17).setOrigin(0.5).setWordWrapWidth(345).setAlign("center"));
+    this.feedback = this.fixed(label(this, 195, 510, "", 13, "#dfb778").setOrigin(0.5).setWordWrapWidth(340).setAlign("center"));
+    this.focusBar = this.fixed(this.add.rectangle(45, 565, 300, 5, C.mint).setOrigin(0, 0.5));
+    this.focusBar.setVisible(false);
+    this.fixed(this.add.rectangle(195, 738, 390, 212, C.ink, 0.97));
+    this.flap = button(this, 195, 715, 330, "HOLD TO FLAP · SPACE", () => Sfx.unlock(), true);
+    this.flap.bg.on("pointerdown", p => { if (!this.paused) this.held.add(p.id); });
+    this.flap.bg.on("pointerout", p => this.held.delete(p.id));
+    this.glamour = button(this, 195, 615, 330, "HOLD GLAMOUR · E", () => Sfx.unlock(), true);
+    this.glamour.bg.on("pointerdown", p => { if (!this.paused) this.held.add(p.id); });
+    this.glamour.bg.on("pointerout", p => this.held.delete(p.id));
+    this.glamour.bg.setVisible(false).disableInteractive(); this.glamour.caption.setVisible(false);
+    this.choices = f.resident.choices.map((choice, index) => button(this, 195, 680 + index * 59, 350, `${index + 1}. ${choice[1]}`, () => this.choose(index)));
+    this.choices.forEach(b => { b.bg.setVisible(false).disableInteractive(); b.caption.setVisible(false).setWordWrapWidth(325); });
+    const pause = button(this, 344, 57, 52, "Ⅱ", () => this.paused ? this.resumeGame() : this.pauseGame());
+    [pause.bg, pause.caption].forEach(o => this.fixed(o, 95));
+    this.keys = this.input.keyboard.addKeys("SPACE,UP,W,Z,E,J");
+    onKey(this, "keydown", e => {
+      if (["Space", "ArrowUp", "KeyW", "KeyZ"].includes(e.code)) e.preventDefault?.();
+      if (e.repeat) return;
+      if (["Escape", "KeyP"].includes(e.code)) { this.paused ? this.resumeGame() : this.pauseGame(); return; }
+      if (/^Digit[123]$/.test(e.code)) this.choose(Number(e.code.slice(-1)) - 1);
+    });
+    this.input.keyboard.addCapture?.(["SPACE", "UP"]);
+    const release = p => this.held.delete(p.id);
+    this.input.on("pointerup", release); this.input.on("pointerupoutside", release); this.input.on("gameout", () => this.held.clear());
+    this.onBlur = () => this.pauseGame(); this.onVisibility = () => { if (document.hidden) this.pauseGame(); };
+    window.addEventListener("blur", this.onBlur); document.addEventListener("visibilitychange", this.onVisibility);
+    this.events.once("shutdown", () => {
+      window.removeEventListener("blur", this.onBlur); document.removeEventListener("visibilitychange", this.onVisibility);
+      this.input.removeAllListeners(); this.held.clear(); this.input.keyboard.resetKeys(); Sfx.stop();
+    });
+    this.renderFlight();
+    announce(`Night ${f.night}. You are a bat. Hold Space or Flap to rise, release to descend. Reach the window and earn an invitation.`);
+  }
+  choose(index) { if (!this.paused && !this.transitioning) VampBat.choose(this.flight, index); }
+  pauseGame() {
+    if (this.paused || this.transitioning) return;
+    this.paused = true; this.held.clear(); this.input.keyboard.resetKeys(); this.flight.focus = 0; Sfx.stop();
+    const dim = this.fixed(this.add.rectangle(195, 422, 390, 844, C.ink, 0.97).setInteractive(), 90);
+    const title = this.fixed(label(this, 195, 360, "THE SKY CAN WAIT.", 25).setOrigin(0.5), 91);
+    const resume = button(this, 195, 450, 330, "RESUME FLIGHT", () => this.resumeGame(), true);
+    this.pauseObjects = [dim, title, this.fixed(resume.bg, 91), this.fixed(resume.caption, 91)];
+    announce("Flight paused. The sunrise clock is paused too.");
+  }
+  resumeGame() {
+    if (!this.paused || this.transitioning) return;
+    this.pauseObjects.forEach(o => o.destroy()); this.pauseObjects = [];
+    this.held.clear(); this.input.keyboard.resetKeys(); this.accumulator = 0; this.paused = false;
+  }
+  renderFlight() {
+    const f = this.flight, b = f.bat, g = this.scenery;
+    this.cameras.main.scrollX = Math.max(0, Math.min(f.width - 310, b.x - 125));
+    this.cameras.main.scrollY = 0;
+    g.clear();
+    g.fillStyle(0x141d2b); g.fillRect(0, 635, f.width + 250, 50);
+    f.obstacles.forEach(o => {
+      const upper = o.center - o.gap / 2, lower = o.center + o.gap / 2;
+      g.fillStyle(0x2a3043); g.fillRect(o.x, 210, o.w, upper - 210); g.fillRect(o.x, lower, o.w, 640 - lower);
+      g.fillStyle(0xab939b); g.fillRect(o.x - 5, upper - 6, o.w + 10, 6); g.fillRect(o.x - 5, lower, o.w + 10, 6);
+      g.lineStyle(2, 0x655e77); g.lineBetween(o.x + 14, 220, o.x + 14, upper - 10);
+    });
+    const win = f.window;
+    g.fillStyle(0x2f3448); g.fillRect(win.x + 6, win.y - 90, 170, 660 - win.y);
+    g.fillStyle(0xecd19a, 0.16); g.fillCircle(win.x + 25, win.y, 60);
+    g.fillStyle(0xc59d69); g.fillRoundedRect(win.x, win.y - 42, 66, 90, 21);
+    g.fillStyle(0x34273a); g.fillRoundedRect(win.x + 7, win.y - 34, 52, 76, 17);
+    g.fillStyle(0xe1c79a); g.fillRect(win.x - 6, win.y + 46, 78, 6);
+    const bat = this.batGraphic; bat.clear(); bat.fillStyle(0x211a30);
+    const wing = preferences.reducedMotion ? 8 : Math.sin(f.elapsed * 17) * 13;
+    bat.fillTriangle(b.x - 3, b.y, b.x - 29, b.y - wing, b.x - 15, b.y + 10);
+    bat.fillTriangle(b.x + 3, b.y, b.x + 29, b.y - wing, b.x + 15, b.y + 10);
+    bat.fillEllipse(b.x, b.y, 15, 21); bat.fillTriangle(b.x - 7, b.y - 5, b.x - 6, b.y - 15, b.x, b.y - 7);
+    bat.fillStyle(0xf486a0); bat.fillCircle(b.x + 3, b.y - 4, 2);
+    const seconds = Math.ceil(f.timeLeft);
+    this.clock.setText(`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} TO SUNRISE`);
+    this.statusText.setText(`${f.lives} COFFINS · ${f.profile.dirt} DIRT · SAME NIGHT CLOCK`);
+    this.dawn.setAlpha(Math.max(0, 1 - f.timeLeft / f.level.duration - 0.35) * 0.8);
+    if (f.status === "window") {
+      if (!this.windowShown) {
+        this.windowShown = true; this.held.clear();
+        this.flap.bg.setVisible(false).disableInteractive(); this.flap.caption.setVisible(false);
+        this.glamour.bg.setVisible(true).setInteractive(); this.glamour.caption.setVisible(true);
+        this.choices.forEach(b => { b.bg.setVisible(true).setInteractive(); b.caption.setVisible(true); });
+        this.focusBar.setVisible(true);
+      }
+      this.phaseText.setText(f.resident.name);
+      this.concern.setText(`“${f.resident.concern}”`);
+      this.note.setText(f.invitationLeft > 0 ? `CHOOSE YOUR PROMISE · ${f.invitationLeft.toFixed(1)}s` : VampBat.calm(f) ? "CALM · HOLD GLAMOUR" : "SUSPICIOUS · WAIT FOR THEIR GAZE TO SOFTEN");
+      this.focusBar.setScale(f.invitationLeft > 0 ? f.invitationLeft / 4 : f.focus / 1.1, 1);
+      this.choices.forEach(b => b.bg.setAlpha(f.invitationLeft > 0 ? 1 : 0.4));
+    }
+  }
+  update(_time, delta) {
+    if (this.paused || this.transitioning) return;
+    const f = this.flight, seconds = Math.max(0, delta / 1000), key = k => this.keys[k]?.isDown;
+    VampBat.advance(f, Math.max(0, seconds - 0.05)); this.accumulator += Math.min(seconds, 0.05);
+    while (this.accumulator >= STEP) {
+      VampBat.step(f, { flap: key("SPACE") || key("UP") || key("W") || key("Z") || this.held.size > 0, glamour: key("E") || key("J") || this.held.size > 0 }, STEP);
+      this.accumulator -= STEP;
+    }
+    for (const event of f.events.splice(0)) { Sfx.play(event.kind); if (event.text) { announce(event.text); this.feedback.setText(event.text); } }
+    this.renderFlight(); Sfx.tick(f.level.duration - f.timeLeft, f.timeLeft);
+    if (f.status === "invited" || f.status === "dead") {
+      this.transitioning = true; this.held.clear(); Sfx.stop(); Sfx.play(f.status === "invited" ? "safe" : "dead");
+      Save.write("vampRunnerProgress", f.profile);
+      if (f.status === "dead") {
+        Save.write("vampRunnerCampaign", null);
+        this.scene.start("Score", { score: f.score, nights: f.night - 1, reason: f.reason, profile: f.profile });
+      } else {
+        this.concern.setText("Come in, little one.\n+5 dirt · +200 points");
+        if (!preferences.reducedMotion) this.tweens.add({ targets: this.batGraphic, x: 70, alpha: 0, duration: 650 });
+        this.time.delayedCall(700, () => this.scene.start("Game", { ...this.runData, profile: f.profile, lives: f.lives, score: f.score, timeLeft: f.timeLeft }));
+      }
+    }
+  }
+}
+
+// Menus own an unscrolled camera. No gameplay container can offset their hit areas.
+class CryptScene extends Phaser.Scene {
+  constructor() { super("Crypt"); }
+  init(data = {}) {
+    this.run = { ...data, profile: cleanProgress(data.profile) };
+    this.transitioning = false;
+    this.storageOK = true;
+  }
+  create() {
+    Sfx.play("safe");
+    this.cameras.main.setScroll(0, 0);
+    vignette(this);
+    label(this, 24, 31, this.run.nightNumber % 12 === 0 ? "CAMPAIGN COMPLETE · BLOOD MOON UNLOCKED" : "SAFE UNTIL THE NEXT SUNSET", 10, "#90d9bf", true);
+    label(this, 24, 90, this.run.nightNumber % 12 === 0 ? "THE CITY IS YOURS." : `NIGHT ${String(this.run.nightNumber).padStart(2, "0")} SURVIVED.`, 28);
+    const next = CAMPAIGN[nightSettings(this.run.nightNumber + 1).chapter];
+    label(this, 24, 137, `Next: ${next.name}`, 17, "#acbdc9");
+    if (nightSettings(this.run.nightNumber + 1).oneWay) label(this, 24, 164, "ONE WAY · GATES SEAL BEHIND YOU", 11, "#dfb778", true);
+    label(this, 24, 190, this.run.score.toLocaleString(), 39);
+    label(this, 25, 236, "RUN SCORE", 11, "#acbdc9", true);
+    this.balance = label(this, 365, 196, "", 27, "#dfb778").setOrigin(1, 0);
+    label(this, 365, 235, "GRAVE DIRT", 11, "#acbdc9", true).setOrigin(1, 0);
+    (this.run.contracts || []).forEach((contract, i) => {
+      const value = contract.key === "untouched" ? contract.complete ? "perfect" : "missed" : `${contract.value}/${contract.target}`;
+      label(this, 24, 261 + i * 19, `${contract.complete ? "✓" : "○"} ${contract.title}: ${value}`, 12, contract.complete ? "#90d9bf" : "#a9bac8");
+      if (contract.complete) label(this, 365, 261 + i * 19, `+${contract.reward} dirt`, 12, "#dfb778").setOrigin(1, 0);
+    });
+    label(this, 24, 324, "PERMANENT UPGRADES", 11, "#dfb778", true);
+    this.shop = UPGRADES.map((upgrade, i) => {
+      const y = 365 + i * 85;
+      const name = label(this, 24, y, "", 19);
+      label(this, 24, y + 29, upgrade.detail, 12, "#a9bac8").setWordWrapWidth(205);
+      const buy = button(this, 302, y + 19, 127, "", () => this.buy(upgrade.key));
+      return { upgrade, name, buy };
+    });
+    this.restore = button(this, 195, 640, 342, "", () => this.restoreCoffin());
+    this.saveNote = label(this, 195, 678, "", 11, "#a9bac8").setOrigin(0.5);
+    this.next = button(this, 195, 724, 342, this.run.nightNumber % 12 === 0 ? "ENTER THE BLOOD MOON →" : "NEXT NIGHT →", () => this.nextNight(), true);
+    button(this, 102, 788, 158, "SAVE & QUIT", () => this.returnToMenu());
+    button(this, 280, 788, 171, "END RUN & SAVE SCORE", () => this.endRun());
+    onKey(this, "keydown-ENTER", () => this.nextNight());
+    this.persist();
+    this.refreshShop();
+    announce(`Night ${this.run.nightNumber} survived. Buy upgrades or press Enter for the next night.`);
+  }
+  persist() {
+    const progressOK = Save.write("vampRunnerProgress", this.run.profile);
+    const runOK = Save.write("vampRunnerCampaign", { version: 1, nightNumber: this.run.nightNumber + 1, score: this.run.score, lives: this.run.lives, seed: this.run.seed ?? 1 });
+    this.storageOK = progressOK && runOK;
+  }
+  buy(key) {
+    if (this.transitioning || !purchase(this.run.profile, key)) return;
+    this.persist(); this.refreshShop(); Sfx.play("blood");
+  }
+  restoreCoffin() {
+    if (this.transitioning || this.run.lives >= MAX_LIVES || this.run.profile.dirt < COFFIN_COST) return;
+    this.run.profile.dirt -= COFFIN_COST; this.run.lives++;
+    this.persist(); this.refreshShop(); Sfx.play("safe");
+  }
+  refreshShop() {
+    this.balance.setText(String(this.run.profile.dirt));
+    this.shop.forEach(({ upgrade, name, buy }) => {
+      const level = this.run.profile.upgrades[upgrade.key], cost = upgrade.cost * (level + 1);
+      name.setText(`${upgrade.name} ${level}/3`);
+      buy.caption.setText(level >= 3 ? "MAXED" : `${cost} DIRT`);
+      buy.bg.setAlpha(level >= 3 || this.run.profile.dirt < cost ? 0.4 : 1);
+    });
+    this.restore.caption.setText(this.run.lives >= MAX_LIVES ? "3 / 3 COFFINS · RESTED" : `COFFINS ${this.run.lives}/3 · RESTORE FOR ${COFFIN_COST} DIRT`);
+    this.restore.bg.setAlpha(this.run.lives >= MAX_LIVES || this.run.profile.dirt < COFFIN_COST ? 0.4 : 1);
+    this.saveNote.setText(this.storageOK ? "Next night saved. You can come back later." : "Browser saving unavailable · kept for this session.");
+  }
+  nextNight() {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    this.scene.start("Bat", { nightNumber: this.run.nightNumber + 1, score: this.run.score, lives: this.run.lives, seed: this.run.seed ?? 1, profile: this.run.profile });
+  }
+  returnToMenu() {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    this.persist();
+    this.scene.start("Menu");
+  }
+  endRun() {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    Save.write("vampRunnerCampaign", null);
+    this.scene.start("Score", { score: this.run.score, nights: this.run.nightNumber, reason: "You made it home before dawn.", profile: this.run.profile });
+  }
+}
 
 class ScoreScene extends Phaser.Scene {
-  constructor() { super('Score'); }
-
-  init(data) {
-    this.finalScore = data.score  || 0;
-    this.nights     = data.nights || 1;
-    this.playerName = '';
-    this.submitted  = false;
+  constructor() {
+    super("Score");
   }
-
+  init(data = {}) {
+    this.finalScore = data.score || 0;
+    this.nights = data.nights || 0;
+    this.reason = data.reason || "";
+    this.submitted = false;
+    this.playerName = "";
+    this.profile = data.profile ?? Save.progress();
+  }
   create() {
-    this.cameras.main.setBackgroundColor('#0a0a14');
-    const cx = GAME_W / 2;
-    const survived = this.nights - 1;
-
-    this.add.text(cx, 38, 'YOU PERISH', {
-      fontFamily: 'Georgia, serif', fontSize: '30px',
-      color: '#ff2222', stroke: '#000', strokeThickness: 4,
-    }).setOrigin(0.5, 0.5);
-
-    this.add.text(cx, 76, survived > 0 ? 'Survived ' + survived + ' night' + (survived === 1 ? '' : 's') : 'Night 1 — no shelter', {
-      fontFamily: 'Georgia, serif', fontSize: '16px', color: '#aaaaff', stroke: '#000', strokeThickness: 2,
-    }).setOrigin(0.5, 0.5);
-
-    this.add.text(cx, 110, 'SCORE  ' + String(this.finalScore).padStart(6, '0'), {
-      fontFamily: 'Courier New, monospace', fontSize: '24px', color: '#ffffff', stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5, 0.5);
-
-    this.add.text(cx, 145, 'ENTER YOUR NAME', {
-      fontFamily: 'Georgia, serif', fontSize: '15px', color: '#aaaaaa',
-    }).setOrigin(0.5, 0.5);
-
-    this.nameDisplay = this.add.text(cx, 180, this.getNameDisplay(), {
-      fontFamily: 'Courier New, monospace', fontSize: '30px', color: '#ffdd44', stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5, 0.5);
-
-    this.buildKeyboard();
-    this.buildLeaderboard();
-  }
-
-  getNameDisplay() {
-    let s = '';
-    for (let i = 0; i < 7; i++) {
-      s += i < this.playerName.length ? this.playerName[i] : '_';
-      if (i < 6) s += ' ';
-    }
-    return s;
-  }
-
-  buildKeyboard() {
-    const cx = GAME_W / 2;
-    const rows = ['ABCDEFGHI', 'JKLMNOPQR', 'STUVWXYZ'];
-    const KEY = 34, GAP = 3;
-
-    rows.forEach((row, ri) => {
-      const letters = row.split('');
-      const rowW = letters.length * KEY + (letters.length - 1) * GAP;
-      const rx = (GAME_W - rowW) / 2;
-      const ry = 205 + ri * (KEY + GAP);
-      letters.forEach((letter, ci) => {
-        const kx = rx + ci * (KEY + GAP) + KEY / 2;
-        const ky = ry + KEY / 2;
-        const bg = this.add.rectangle(kx, ky, KEY - 2, KEY - 2, 0x2a2a4a).setInteractive({ useHandCursor: true });
-        this.add.text(kx, ky, letter, { fontFamily: 'Courier New, monospace', fontSize: '17px', color: '#ddddff' }).setOrigin(0.5, 0.5);
-        bg.on('pointerdown', () => this.pressKey(letter));
-        bg.on('pointerover', () => bg.setFillStyle(0x554488));
-        bg.on('pointerout',  () => bg.setFillStyle(0x2a2a4a));
+    vignette(this);
+    label(this, 195, 57, "THE NIGHT REMEMBERS", 10, "#c08d9b", true).setOrigin(
+      0.5,
+    );
+    label(
+      this,
+      195,
+      103,
+      this.nights ? "A GOOD NIGHT TO LIVE." : "BACK TO THE SHADOWS.",
+      24,
+    ).setOrigin(0.5);
+    label(this, 195, 145, this.reason, 14, "#a9bac8")
+      .setOrigin(0.5)
+      .setWordWrapWidth(342)
+      .setAlign("center");
+    label(this, 195, 203, this.finalScore.toLocaleString(), 53).setOrigin(0.5);
+    label(
+      this,
+      195,
+      250,
+      this.nights + " NIGHT" + (this.nights === 1 ? "" : "S") + " SURVIVED",
+      11,
+      "#dfb778",
+      true,
+    ).setOrigin(0.5);
+    label(this, 195, 288, "LEAVE YOUR NAME", 10, "#a9bac8", true).setOrigin(
+      0.5,
+    );
+    this.nameDisplay = label(
+      this,
+      195,
+      318,
+      "_ _ _ _ _ _ _",
+      24,
+      "#dfb778",
+      true,
+    ).setOrigin(0.5);
+    const keyRows = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
+    keyRows.forEach((row, ri) => {
+      const width = row.length * 34,
+        start = (GAME_W - width) / 2;
+      row.split("").forEach((char, i) => {
+        const x = start + i * 34 + 17,
+          y = 370 + ri * 38;
+        const key = this.add
+          .rectangle(x, y, 31, 33, C.panel)
+          .setStrokeStyle(1, C.line)
+          .setInteractive({ useHandCursor: true });
+        label(this, x, y, char, 14, "#cad4de", true).setOrigin(0.5);
+        key.on("pointerdown", () => this.pressKey(char));
       });
     });
-
-    const btnY = 205 + 3 * (KEY + GAP) + 10;
-
-    const backBg = this.add.rectangle(cx - 65, btnY + 16, 108, 30, 0x442222).setInteractive({ useHandCursor: true });
-    this.add.text(cx - 65, btnY + 16, '< BACK', { fontFamily: 'Courier New, monospace', fontSize: '15px', color: '#ff8888' }).setOrigin(0.5, 0.5);
-    backBg.on('pointerdown', () => this.pressBack());
-    backBg.on('pointerover', () => backBg.setFillStyle(0x773333));
-    backBg.on('pointerout',  () => backBg.setFillStyle(0x442222));
-
-    const doneBg = this.add.rectangle(cx + 65, btnY + 16, 108, 30, 0x224422).setInteractive({ useHandCursor: true });
-    this.add.text(cx + 65, btnY + 16, 'DONE >', { fontFamily: 'Courier New, monospace', fontSize: '15px', color: '#88ff88' }).setOrigin(0.5, 0.5);
-    doneBg.on('pointerdown', () => this.submitScore());
-    doneBg.on('pointerover', () => doneBg.setFillStyle(0x337733));
-    doneBg.on('pointerout',  () => doneBg.setFillStyle(0x224422));
+    this.back = button(this, 97, 494, 146, "← DELETE", () => this.pressBack());
+    this.save = button(
+      this,
+      275,
+      494,
+      166,
+      "SAVE SCORE",
+      () => this.submitScore(),
+      true,
+    );
+    this.buildLeaderboard();
+    button(
+      this,
+      195,
+      728,
+      342,
+      "RUN AGAIN  →",
+      () => this.replay(),
+      true,
+    );
+    button(this, 195, 790, 342, "BACK TO THE CITY", () =>
+      this.scene.start("Menu"),
+    );
+    onKey(this, "keydown", (e) => {
+      if (e.repeat) return;
+      if (e.key === "Enter") {
+        this.replay();
+        return;
+      }
+      if (e.key === "Escape") {
+        this.scene.start("Menu");
+        return;
+      }
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        this.pressBack();
+        return;
+      }
+      if (/^[a-z]$/i.test(e.key)) this.pressKey(e.key.toUpperCase());
+    });
+    announce(
+      "Run finished. " +
+        this.finalScore +
+        " points, " +
+        this.nights +
+        " nights survived. Enter to run again.",
+    );
   }
-
+  updateName() {
+    this.nameDisplay.setText(
+      this.playerName.padEnd(7, "_").split("").join(" "),
+    );
+  }
+  replay() {
+    Save.write("vampRunnerCampaign", null);
+    this.scene.start("Game", { seed: Math.floor(Math.random() * 0xffffffff), profile: this.profile });
+  }
   pressKey(letter) {
     if (this.submitted || this.playerName.length >= 7) return;
     this.playerName += letter;
-    this.nameDisplay.setText(this.getNameDisplay());
+    this.updateName();
   }
-
   pressBack() {
-    if (this.submitted || this.playerName.length === 0) return;
+    if (this.submitted) return;
     this.playerName = this.playerName.slice(0, -1);
-    this.nameDisplay.setText(this.getNameDisplay());
+    this.updateName();
   }
-
   submitScore() {
     if (this.submitted) return;
+    const scores = cleanScores([
+      ...Save.scores(),
+      { name: this.playerName || "ANON", score: this.finalScore },
+    ]);
+    if (!Save.write("vampRunnerScores", scores)) {
+      this.save.caption.setText("SAVE UNAVAILABLE");
+      announce("This browser cannot save scores. You can still run again.");
+      return;
+    }
     this.submitted = true;
-    const name = (this.playerName || 'AAA').padEnd(7).slice(0, 7);
-    const scores = this.loadScores();
-    scores.push({ name, score: this.finalScore });
-    scores.sort((a, b) => b.score - a.score);
-    scores.splice(10);
-    try { localStorage.setItem('vampRunnerScores', JSON.stringify(scores)); } catch {}
+    this.save.caption.setText("SCORE SAVED");
+    this.save.bg.disableInteractive();
     this.buildLeaderboard();
-
-    this.add.text(GAME_W / 2, GAME_H - 30, 'TAP TO PLAY AGAIN', {
-      fontFamily: 'Georgia, serif', fontSize: '16px', color: '#ffdd44', stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5, 0.5);
-    this.input.once('pointerdown', () => this.scene.start('Game'));
+    announce("Score saved on this device.");
   }
-
-  loadScores() {
-    try { return JSON.parse(localStorage.getItem('vampRunnerScores')) || []; }
-    catch { return []; }
-  }
-
   buildLeaderboard() {
-    if (this.lbContainer) this.lbContainer.destroy();
+    this.lbContainer?.destroy();
     this.lbContainer = this.add.container(0, 0);
-    const scores = this.loadScores();
-    const sy = 370;
-
     this.lbContainer.add(
-      this.add.text(GAME_W / 2, sy, '\u2500\u2500\u2500 HIGH SCORES \u2500\u2500\u2500', {
-        fontFamily: 'Georgia, serif', fontSize: '14px', color: '#ffaa00', stroke: '#000', strokeThickness: 2,
-      }).setOrigin(0.5, 0.5)
+      label(
+        this,
+        195,
+        545,
+        "PERSONAL BESTS · THIS DEVICE",
+        10,
+        "#a9bac8",
+        true,
+      ).setOrigin(0.5),
     );
-
-    scores.slice(0, 8).forEach(({ name, score }, i) => {
-      const line = String(i + 1).padStart(2) + '.  ' + name.padEnd(7) + '  ' + String(score).padStart(6, '0');
-      const color = i === 0 ? '#ffdd44' : i < 3 ? '#cccccc' : '#777788';
+    const scores = Save.scores();
+    if (!scores.length)
       this.lbContainer.add(
-        this.add.text(GAME_W / 2, sy + 24 + i * 22, line, {
-          fontFamily: 'Courier New, monospace', fontSize: '14px', color,
-        }).setOrigin(0.5, 0.5)
+        label(
+          this,
+          195,
+          586,
+          "No legends yet. Save the first one.",
+          13,
+          "#a9bac8",
+        ).setOrigin(0.5),
+      );
+    scores.slice(0, 4).forEach((score, i) => {
+      this.lbContainer.add(
+        label(
+          this,
+          40,
+          573 + i * 26,
+          String(i + 1).padStart(2, "0") + "  " + score.name,
+          13,
+          i === 0 ? "#dfb778" : "#a9bac8",
+          true,
+        ),
+      );
+      this.lbContainer.add(
+        label(
+          this,
+          350,
+          573 + i * 26,
+          score.score.toLocaleString(),
+          13,
+          "#eee5d3",
+          true,
+        ).setOrigin(1, 0),
       );
     });
   }
 }
-
-// ─── CONFIG & LAUNCH ──────────────────────────────────────────────────────────
+function announce(message) {
+  const live = document.getElementById("game-status");
+  if (live) live.textContent = message;
+}
 
 const config = {
   type: Phaser.AUTO,
   width: GAME_W,
   height: GAME_H,
-  backgroundColor: '#000000',
-  physics: {
-    default: 'arcade',
-    arcade: { gravity: { y: 0 }, debug: false },
-  },
-  scene: [BootScene, GameScene, ScoreScene],
-  scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
-    parent: document.body,
-  },
+  backgroundColor: "#0b1018",
+  parent: "game",
+  input: { activePointers: 3, keyboard: true },
+  render: { antialias: true, roundPixels: true },
+  scene: [BootScene, MenuScene, GameScene, BatScene, CryptScene, ScoreScene],
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
 };
-
-new Phaser.Game(config);
+if (typeof module !== "undefined" && module.exports)
+  module.exports = {
+    BootScene,
+    MenuScene,
+    GameScene,
+    BatScene,
+    CryptScene,
+    ScoreScene,
+    Save,
+    config,
+  };
+else new Phaser.Game(config);

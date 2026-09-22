@@ -1,26 +1,119 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Vampire Runner</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      width: 100vw;
-      height: 100dvh;
-      overflow: hidden;
-      touch-action: none;
-    }
-    canvas { display: block; max-width: 100%; max-height: 100%; }
-  </style>
-</head>
-<body>
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
-  <script src="game.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b1018" />
+    <meta
+      name="description"
+      content="Twelve nights. Eight districts. Run, fly, glamour and bite your way home before sunrise in Vamp Runner, from Tanagra Labs."
+    />
+    <title>Vamp Runner · Tanagra Labs</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="arcade" aria-label="Vamp Runner">
+      <aside class="introduction">
+        <p class="eyebrow">TANAGRA LABS / ARCADE 01</p>
+        <h1>Dawn waits<br />for no one.</h1>
+        <p class="lede">
+          A little blood.<br />A little grave dirt.<br />Another night alive.
+        </p>
+        <div class="rule"></div>
+        <p class="small">
+          Twelve nights. Eight districts.<br />A city with no love for the undead.
+        </p>
+        <p class="edition">RUN. FLY. GLAMOUR. BITE.</p>
+      </aside>
+      <section class="cabinet" aria-label="Game">
+        <div
+          id="game"
+          tabindex="0"
+          aria-label="Vamp Runner. Enter starts. Left and Right or A and D move. Space jumps. Hold E while stationary and facing a human to glamour; approach and press F to bite. In bat flight, hold Space to rise and release to descend. Escape pauses. Touch controls are shown."
+        >
+          <div id="loading" role="status">
+            <span class="eyebrow">THE CITY IS SLEEPING</span>
+            <h2>Vamp Runner</h2>
+            <p>Preparing the night…</p>
+          </div>
+        </div>
+      </section>
+      <aside class="field-guide">
+        <p class="eyebrow">A GUIDE TO THE NIGHT</p>
+        <div class="legend">
+          <span class="symbol crypt">◇</span>
+          <div>
+            <h2>Unlock your crypt</h2>
+            <p>Find every blue key. Follow the arrow.<br />Get home before sunrise.</p>
+          </div>
+        </div>
+        <div class="legend">
+          <span class="symbol blood">✧</span>
+          <div>
+            <h2>Take what you need</h2>
+            <p>Syringes heal garlic damage.<br />IV blood gives temporary protection.</p>
+          </div>
+        </div>
+        <div class="legend">
+          <span class="symbol ally">○</span>
+          <div>
+            <h2>Make another vampire</h2>
+            <p>Hold glamour, move close, then bite.<br />Earn dirt and healing. Three bites earn a shield.</p>
+          </div>
+        </div>
+        <div class="rule"></div>
+        <div class="legend">
+          <span class="symbol crypt">◆</span>
+          <div>
+            <h2>Bring home grave dirt</h2>
+            <p>Explore rooftops and complete challenges. Buy upgrades or restore coffins.</p>
+          </div>
+        </div>
+        <dl class="controls">
+          <div>
+            <dt>Move</dt>
+            <dd>← → / A D / Q D</dd>
+          </div>
+          <div>
+            <dt>Jump</dt>
+            <dd>SPACE / ↑ / W / Z</dd>
+          </div>
+          <div>
+            <dt>Glamour</dt>
+            <dd>HOLD E</dd>
+          </div>
+          <div><dt>Bite</dt><dd>F</dd></div>
+          <div><dt>Bat flight</dt><dd>HOLD SPACE</dd></div>
+          <div>
+            <dt>Pause</dt>
+            <dd>ESC / P</dd>
+          </div>
+        </dl>
+        <p class="small">
+          Hold an arrow and tap Jump or Bite.<br />Release movement and hold Glamour<br />to focus. As a bat, hold Flap to rise.<br />Save &amp; Quit at the crypt to continue later.
+        </p>
+      </aside>
+    </main>
+    <p
+      id="game-status"
+      class="sr-only"
+      aria-live="polite"
+      aria-atomic="true"
+    ></p>
+    <noscript
+      ><p class="load-error">Vamp Runner needs JavaScript to play.</p></noscript
+    >
+    <script
+      src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"
+      onerror="document.getElementById('loading').innerHTML='<h2>The night is out of reach.</h2><p>The game engine could not load. Check your connection and reload this page.</p>'"
+    ></script>
+    <script src="levels.js"></script>
+    <script src="rules.js"></script>
+    <script src="audio.js"></script>
+    <script src="bat.js"></script>
+    <script src="game.js"></script>
+  </body>
 </html>
