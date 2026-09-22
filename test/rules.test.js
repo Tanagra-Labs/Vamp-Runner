@@ -1,39 +1,32 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const R = require("../rules");
+const { play } = require("./campaign-driver");
 
 function tick(w, seconds, input = {}) {
   for (let i = 0; i < Math.round(seconds / R.STEP); i++) R.step(w, input);
 }
 
-for (const night of [1, 2, 3, 9, 25]) {
-  test(`night ${night}: the real simulation reaches the crypt with three coffins`, () => {
-    const w = R.createWorld({ nightNumber: night });
-    for (let i = 0; i < 120 * 40 && w.status === "playing"; i++) {
-      const p = w.player;
-      const jump = p.grounded && (w.level.gaps.some((g) => g.x - p.x < 55 && g.x - p.x > -5) || w.level.hazards.some((h) => h.x - p.x < 62 && h.x - p.x > -5));
-      R.step(w, { move: 1, jump });
+for (let night = 1; night <= 12; night++) {
+  test(`chapter ${night}: three route seeds can be completed with starting abilities`, () => {
+    for (const seed of [1, 7, 2026]) {
+      const w = R.createWorld({ nightNumber: night, seed }), result = play(w);
+      assert.equal(w.status, "safe", JSON.stringify({ night, seed, ...result }));
+      assert.ok(w.lives > 0); assert.ok(w.timeLeft > 0);
+      assert.equal(w.keys, w.level.requiredKeys);
+      assert.ok(w.elapsed > 25, "a route must contain substantial traversal");
+      const score = w.score, dirt = w.profile.dirt;
+      R.finishNight(w); tick(w, 2);
+      assert.equal(w.score, score); assert.equal(w.profile.dirt, dirt, "rewards cannot be granted twice");
     }
-    assert.equal(w.status, "safe");
-    assert.equal(w.lives, 3);
-    assert.ok(w.timeLeft > 0);
-    const score = w.score;
-    R.finishNight(w); tick(w, 2);
-    assert.equal(w.score, score, "survival reward must only be granted once");
   });
 }
 
 test("rooftop route can be climbed and gives extra dirt plus an IV power-up", () => {
-  const w = R.createWorld(); let jumps = 0;
-  for (let i = 0; i < 600; i++) {
-    const p = w.player;
-    const jump = p.grounded && ((jumps === 0 && p.x > 292) || (jumps === 1 && p.x > 390));
-    if (jump) jumps++;
-    R.step(w, { move: p.x < 620 ? 1 : 0, jump });
-  }
-  assert.equal(w.player.y + w.player.h, 439);
-  assert.ok(w.profile.dirt >= 13);
-  assert.ok(w.iv > 0);
+  const w = R.createWorld(); const result = play(w);
+  assert.ok(result.maxHeight < 355, "the key requires a climb to the third rooftop");
+  assert.ok(w.stats.dirt >= 16);
+  assert.ok(w.level.pickups.some(p=>p.kind === "iv" && !p.active));
   assert.equal(w.lives, 3);
 });
 
@@ -113,21 +106,22 @@ test("grave dirt and upgrades survive a new night without sharing mutable level 
   R.collect(a, pickup); R.collect(a, pickup);
   assert.equal(a.profile.dirt, pickup.value);
   a.profile.dirt = 100;
-  assert.equal(R.purchase(a.profile, "stride"), true); assert.equal(a.profile.dirt, 80);
+  assert.equal(R.purchase(a.profile, "stride"), true); assert.equal(a.profile.dirt, 55);
   const b = R.createWorld({ nightNumber: 2, lives: 2, score: 900, profile: a.profile });
-  assert.equal(b.profile.dirt, 80); assert.equal(b.profile.upgrades.stride, 1);
+  assert.equal(b.profile.dirt, 55); assert.equal(b.profile.upgrades.stride, 1);
   assert.equal(b.lives, 2); assert.equal(b.score, 900);
   assert.equal(b.garlicHits, 0); assert.equal(b.iv, 0); assert.equal(b.status, "playing");
   assert.ok(b.level.pickups.every((p) => p.active));
-  b.profile.dirt--; assert.equal(a.profile.dirt, 80);
+  b.profile.dirt--; assert.equal(a.profile.dirt, 55);
 });
 
 test("upgrade purchases enforce cost and cap, and corrupt stored data cannot grant invalid levels", () => {
   const p = R.cleanProgress({ dirt: -5, upgrades: { stride: 999, stun: "2", iv: null } });
-  assert.deepEqual(p, { dirt: 0, upgrades: { stride: 3, stun: 0, iv: 0 } });
+  assert.equal(p.dirt, 0); assert.deepEqual(p.upgrades, { stride: 3, stun: 0, iv: 0 });
+  assert.deepEqual(p.medals, new Array(12).fill(0)); assert.equal(p.bestNight, 0);
   assert.equal(R.purchase(p, "stride"), false); assert.equal(R.purchase(p, "stun"), false);
   assert.equal(R.purchase(p, "__proto__"), false);
-  p.dirt = 16; assert.equal(R.purchase(p, "stun"), true); assert.equal(p.dirt, 0);
+  p.dirt = 40; assert.equal(R.purchase(p, "stun"), true); assert.equal(p.dirt, 0);
 });
 
 test("dawn ends a run once without a survival bonus", () => {

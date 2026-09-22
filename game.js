@@ -1,8 +1,8 @@
 // Vamp Runner — a mobile vampire platformer. Phaser 3.60, no build step.
 /* global Phaser, VampRules */
 const {
-  FLOOR, MAX_LIVES, STEP, UPGRADES, createWorld, step,
-  cleanProgress, purchase, targetHuman, cleanScores,
+  FLOOR, MAX_LIVES, STEP, UPGRADES, COFFIN_COST, CAMPAIGN, createWorld, step,
+  cleanProgress, cleanRun, purchase, targetHuman, cleanScores, contractResults, pulseState, nightSettings,
 } = VampRules;
 const GAME_W = 390,
   GAME_H = 844;
@@ -29,6 +29,7 @@ const Save = {
   },
   write(key, value) {
     if (key === "vampRunnerProgress") this.sessionProgress = cleanProgress(value);
+    if (key === "vampRunnerCampaign") this.sessionRun = cleanRun(value);
     try {
       localStorage.setItem(key, JSON.stringify(value));
       return true;
@@ -41,6 +42,9 @@ const Save = {
   },
   progress() {
     return cleanProgress(this.sessionProgress ?? this.read("vampRunnerProgress", {}));
+  },
+  run() {
+    return cleanRun(this.sessionRun === undefined ? this.read("vampRunnerCampaign", null) : this.sessionRun);
   },
   settings() {
     const saved = this.read("vampRunnerSettings", {});
@@ -235,6 +239,11 @@ class BootScene extends Phaser.Scene {
       g.lineStyle(2, 0xc8d9df); g.lineBetween(20, 30, 20, 36); g.lineBetween(20, 36, 28, 36);
       g.fillStyle(C.cream); g.fillRect(18, 2, 4, 4); g.fillRect(18, 17, 4, 8); g.fillRect(16, 19, 8, 4);
     });
+    texture("key", () => {
+      g.fillStyle(0x90d6f5, 0.16); g.fillCircle(20, 20, 19);
+      g.lineStyle(3, 0x90d6f5); g.strokeCircle(15, 13, 6);
+      g.lineBetween(19, 17, 30, 29); g.lineBetween(26, 24, 30, 20); g.lineBetween(29, 28, 33, 24);
+    });
     texture("garlic", () => {
       g.fillStyle(0xe7dbc1); g.fillEllipse(20, 25, 25, 23);
       g.fillStyle(0xc5b99e); g.fillEllipse(12, 26, 8, 16); g.fillEllipse(28, 26, 8, 16);
@@ -354,20 +363,22 @@ class MenuScene extends Phaser.Scene {
       16,
       "#afbec9",
     );
-    label(this, 26, 313, "THREE COFFINS. ONE MORE NIGHT.", 10, "#dfb778", true);
+    const progress = Save.progress();
+    const medals = progress.medals.reduce((sum, mask) => sum + [1, 2, 4].filter((bit) => mask & bit).length, 0);
+    label(this, 26, 313, `12 NIGHTS · 6 DISTRICTS · ${medals}/36 MARKS`, 10, "#dfb778", true);
     label(this, 24, 395, "Make it home before dawn.", 24);
     label(
       this,
       24,
       435,
-      "Jump through the city. Stun, then bite.\nThree garlic hits or one cross: lose a coffin.",
+      "Find the blue keys. Unlock your crypt.\nThree garlic hits or one cross: lose a coffin.",
       14,
       "#afbec9",
     ).setLineSpacing(6);
     const rows = [
       ["01", "RUN & JUMP", "← → / A D / Q D. Space to jump."],
       ["02", "STUN → BITE", "E to stun. Get close. F to turn them."],
-      ["03", "BLOOD & GRAVE DIRT", "IV gives power. Dirt buys upgrades."],
+      ["03", "SURVIVE & MASTER", "Extra challenges. Saved nights. Harder hunts."],
     ];
     rows.forEach(([num, title, copy], i) => {
       const y = 500 + i * 54;
@@ -375,31 +386,22 @@ class MenuScene extends Phaser.Scene {
       label(this, 57, y, title, 11, "#eee5d3", true);
       label(this, 57, y + 19, copy, 12, "#a5b5c4");
     });
+    this.checkpoint = Save.run();
     button(
       this,
       195,
-      696,
+      684,
       342,
-      "ENTER THE NIGHT  →",
+      this.checkpoint ? `CONTINUE · NIGHT ${this.checkpoint.nightNumber} →` : "START THE CAMPAIGN →",
       () => this.startRun(),
       true,
     );
-    const best = Save.scores()[0];
-    label(
-      this,
-      195,
-      734,
-      best
-        ? "PERSONAL BEST  " + best.score.toLocaleString()
-        : "Your legend starts tonight.",
-      11,
-      "#9cabb8",
-      true,
-    ).setOrigin(0.5);
-    this.soundButton = button(this, 105, 783, 158, "", () =>
+    if (this.checkpoint) button(this, 195, 742, 342, "START A NEW HUNT", () => this.startRun(false));
+    else label(this, 195, 737, "Crypts save your place between nights.", 12, "#a9bac8").setOrigin(0.5);
+    this.soundButton = button(this, 105, 805, 158, "", () =>
       this.toggleSound(),
     );
-    this.motionButton = button(this, 280, 783, 166, "", () =>
+    this.motionButton = button(this, 280, 805, 166, "", () =>
       this.toggleMotion(),
     );
     this.refreshSettings();
@@ -429,11 +431,13 @@ class MenuScene extends Phaser.Scene {
     Save.write("vampRunnerSettings", preferences);
     this.refreshSettings();
   }
-  startRun() {
+  startRun(resume = true) {
     if (this.starting) return;
     this.starting = true;
     Sfx.play("glamour");
-    this.scene.start("Game", { profile: Save.progress() });
+    const checkpoint = resume ? this.checkpoint : null;
+    if (!checkpoint) Save.write("vampRunnerCampaign", null);
+    this.scene.start("Game", { seed: Math.floor(Math.random() * 0xffffffff), ...checkpoint, profile: Save.progress() });
   }
 }
 
@@ -448,7 +452,7 @@ class GameScene extends Phaser.Scene {
     this.pending = {};
     this.held = new Map();
     this.accumulator = 0;
-    this.messageUntil = 0;
+    this.messageUntil = 3;
     this.pauseObjects = [];
     this.time.paused = false;
     this.tweens.resumeAll();
@@ -470,12 +474,14 @@ class GameScene extends Phaser.Scene {
       this.resetInput();
     });
     this.renderWorld();
-    announce(`Night ${this.world.night}. Jump through the city to the crypt before sunrise. Stun humans, then bite.`);
+    this.message.setText(`${this.world.level.name}\nFind ${this.world.level.requiredKeys} blue crypt key${this.world.level.requiredKeys > 1 ? "s" : ""}.`);
+    announce(`Night ${this.world.night}: ${this.world.level.name}. Find ${this.world.level.requiredKeys} crypt keys before sunrise.`);
   }
   fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
   drawCity() {
     const sky = this.fixed(this.add.graphics(), -10);
-    sky.fillGradientStyle(0x101322, 0x101322, 0x493441, 0x493441, 1);
+    const theme = this.world.level.theme;
+    sky.fillGradientStyle(0x101322, 0x101322, theme.sky, theme.sky, 1);
     sky.fillRect(0, 0, GAME_W, GAME_H);
     for (let i = 0; i < 40; i++) {
       sky.fillStyle(C.cream, 0.25 + (i % 4) * 0.1);
@@ -486,11 +492,23 @@ class GameScene extends Phaser.Scene {
     this.dawn = this.fixed(this.add.rectangle(195, 422, 390, 844, 0xf5a568, 0), -8);
     for (let layer = 0; layer < 2; layer++) {
       const g = this.add.graphics().setScrollFactor(layer ? 0.45 : 0.2).setDepth(-6 + layer);
-      for (let i = 0; i < 35; i++) {
+      for (let i = 0; i < Math.ceil(this.world.level.width * 0.5 / 86) + 6; i++) {
         const x = i * 86, h = 80 + ((i * 37 + layer * 47) % 170), y = FLOOR - h;
-        g.fillStyle(layer ? 0x1b2630 : 0x252b3b);
+        g.fillStyle(layer ? theme.stone : 0x252b3b);
+        if (theme.motif === "trees") {
+          g.fillRect(x + 34, y, 9, h);
+          g.lineStyle(7, theme.stone); g.lineBetween(x + 38, y + 60, x + 9, y + 24); g.lineBetween(x + 38, y + 83, x + 72, y + 35);
+          g.fillCircle(x + 25, y + 14, 30); g.fillCircle(x + 57, y + 30, 24);
+          continue;
+        }
         g.fillRect(x, y, 80, h + 10);
         g.fillTriangle(x - 5, y, x + 40, y - 28, x + 85, y);
+        if (theme.motif === "spires") g.fillTriangle(x + 24, y, x + 40, y - 75, x + 56, y);
+        if (theme.motif === "awnings") {
+          for (let stripe = 0; stripe < 5; stripe++) {
+            g.fillStyle(stripe % 2 ? 0x9b5569 : 0x968270, 0.7); g.fillRect(x + stripe * 16, y + h - 40, 16, 13);
+          }
+        }
         g.fillStyle(C.gold, layer ? 0.25 : 0.1);
         for (let row = 0; row < Math.floor(h / 35); row++) {
           g.fillRect(x + 19, y + 18 + row * 35, 8, 13);
@@ -502,9 +520,10 @@ class GameScene extends Phaser.Scene {
   drawLevel() {
     const level = this.world.level, g = this.add.graphics().setDepth(1);
     for (const p of level.platforms) {
-      g.fillStyle(p.ground ? 0x263340 : 0x18232e);
+      if (p.motion || p.crumble) continue;
+      g.fillStyle(p.ground ? level.theme.stone : 0x18232e);
       g.fillRect(p.x, p.y, p.w, p.ground ? 120 : FLOOR - p.y);
-      g.fillStyle(p.ground ? 0x78918f : 0x9b8691);
+      g.fillStyle(level.theme.trim);
       g.fillRect(p.x, p.y, p.w, 4);
       g.lineStyle(1, 0x43525b, 0.45);
       for (let x = p.x + 12; x < p.x + p.w - 10; x += 32) {
@@ -516,6 +535,11 @@ class GameScene extends Phaser.Scene {
       }
     }
     for (const gap of level.gaps) {
+      if (gap.water) {
+        g.fillStyle(0x2a6579, 0.6); g.fillRect(gap.x, FLOOR + 18, gap.width, 100);
+        g.lineStyle(1, 0x73b9c6, 0.6);
+        for (let x = gap.x + 8; x < gap.x + gap.width - 18; x += 35) g.lineBetween(x, FLOOR + 26, x + 18, FLOOR + 26);
+      }
       g.fillStyle(C.red, 0.4); g.fillRect(gap.x - 8, FLOOR, 8, 5); g.fillRect(gap.x + gap.width, FLOOR, 8, 5);
       label(this, gap.x + gap.width / 2, FLOOR + 37, "↓", 17, "#c9758a").setOrigin(0.5);
     }
@@ -523,17 +547,21 @@ class GameScene extends Phaser.Scene {
     g.fillStyle(0x35464b); g.fillRect(crypt.x - 60, FLOOR - 108, 120, 108);
     g.fillStyle(0x61746d); g.fillTriangle(crypt.x - 72, FLOOR - 108, crypt.x, FLOOR - 153, crypt.x + 72, FLOOR - 108);
     g.fillStyle(0x091c19); g.fillRoundedRect(crypt.x - 34, FLOOR - 92, 68, 92, 30);
-    this.add.image(crypt.x, FLOOR - 40, "shelter").setDisplaySize(55, 72).setDepth(2);
+    this.cryptDoor = this.add.image(crypt.x, FLOOR - 40, "shelter").setDisplaySize(55, 72).setDepth(2);
     label(this, crypt.x, FLOOR - 174, "YOUR CRYPT", 13, "#90d9bf", true).setOrigin(0.5);
     this.pickups = level.pickups.map((p) => this.add.image(p.x, p.y, p.kind).setDepth(5).setDisplaySize(p.kind === "dirt" ? 27 : 34, p.kind === "dirt" ? 27 : 34));
-    level.hazards.forEach((h) => this.add.image(h.x, h.y, h.kind).setDepth(6).setDisplaySize(36, 40));
+    this.hazardSprites = level.hazards.map((h) => this.add.image(h.x, h.y, h.kind).setDepth(6).setDisplaySize(36, 40));
     this.humans = level.humans.map((h) => this.add.image(h.x, h.y + h.h, "npc_plain").setOrigin(0.5, 1).setDisplaySize(38, 42).setDepth(7));
-    label(this, 420, 393, "ROOFTOP ALLEY", 12, "#dbb77e", true).setOrigin(0.5);
-    label(this, 420, 413, "More dirt. Less time.", 13, "#bec5cd").setOrigin(0.5);
+    this.dynamicGraphic = this.add.graphics().setDepth(3);
+    level.sections.forEach((section) => {
+      label(this, section.start + 100, 277, section.name, 12, "#c6bbab", true);
+      g.lineStyle(2, 0x8a9696, 0.7); g.lineBetween(section.start + 80, FLOOR - 48, section.start + 80, FLOOR);
+      g.fillStyle(0x629c90, 0.8); g.fillTriangle(section.start + 82, FLOOR - 48, section.start + 105, FLOOR - 41, section.start + 82, FLOOR - 33);
+    });
   }
   buildHUD() {
     this.fixed(this.add.rectangle(195, 72, 390, 144, C.ink, 0.97));
-    this.fixed(label(this, 20, 19, `NIGHT ${String(this.world.night).padStart(2, "0")}`, 13, "#dfb778", true));
+    this.fixed(label(this, 20, 19, `NIGHT ${String(this.world.night).padStart(2, "0")}${this.world.night <= 12 ? "/12" : " · BLOOD MOON"}`, 12, "#dfb778", true));
     this.clock = this.fixed(label(this, 370, 18, "", 18, "#eee5d3", true).setOrigin(1, 0));
     this.fixed(this.add.rectangle(20, 54, 350, 4, C.line).setOrigin(0, 0.5));
     this.sunBar = this.fixed(this.add.rectangle(20, 54, 350, 4, C.gold).setOrigin(0, 0.5));
@@ -544,7 +572,9 @@ class GameScene extends Phaser.Scene {
     this.wallet = this.fixed(label(this, 370, 69, "", 13, "#dfb778", true).setOrigin(1, 0));
     this.scoreText = this.fixed(label(this, 370, 96, "", 13, "#eee5d3", true).setOrigin(1, 0));
     this.routeText = this.fixed(label(this, 20, 126, "", 11, "#a9bac8", true));
-    this.message = this.fixed(label(this, 195, 219, "", 15, "#eee5d3").setOrigin(0.5).setWordWrapWidth(350).setAlign("center"));
+    this.keyText = this.fixed(label(this, 20, 157, "", 13, "#90d6f5", true));
+    this.questText = this.fixed(label(this, 20, 184, "", 11, "#c4b28d", true));
+    this.message = this.fixed(label(this, 195, 236, "", 15, "#eee5d3").setOrigin(0.5).setWordWrapWidth(350).setAlign("center"));
     const pause = this.fixed(this.add.rectangle(351, 174, 48, 48, C.ink, 0.9).setStrokeStyle(1, C.line).setInteractive());
     this.fixed(label(this, 351, 174, "Ⅱ", 21).setOrigin(0.5));
     pause.on("pointerdown", (_p, _x, _y, event) => { event?.stopPropagation(); this.pauseGame(); });
@@ -593,7 +623,9 @@ class GameScene extends Phaser.Scene {
     dim.on("pointerdown", (_p, _x, _y, e) => e?.stopPropagation());
     add(label(this, 195, 228, "THE NIGHT CAN WAIT.", 27).setOrigin(0.5));
     add(label(this, 195, 285, "Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nStun  E     ·     Bite  F\nPause  Escape / P", 16, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(14));
-    add(label(this, 195, 461, "IV blood protects you.\nGrave dirt buys permanent upgrades.", 15, "#dfb778").setOrigin(0.5).setAlign("center").setLineSpacing(8));
+    const contracts = contractResults(this.world).map((c) => `${c.complete ? "✓" : "○"} ${c.title}: ${c.key === "untouched" ? c.value === 0 ? "on track" : "missed" : c.value + "/" + c.target} (+${c.reward} dirt)`);
+    add(label(this, 195, 440, "OPTIONAL NIGHT CHALLENGES", 11, "#dfb778", true).setOrigin(0.5));
+    add(label(this, 195, 477, contracts.join("\n"), 13, "#dfb778").setOrigin(0.5).setAlign("center").setLineSpacing(8));
     const resume = button(this, 195, 564, 330, "RESUME THE NIGHT", () => this.resumeGame(), true);
     const end = button(this, 195, 628, 330, "END RUN", () => this.finishRun("You returned to the shadows."));
     [resume.bg, resume.caption, end.bg, end.caption].forEach(add);
@@ -611,7 +643,7 @@ class GameScene extends Phaser.Scene {
   }
   runSnapshot() {
     const w = this.world;
-    return { nightNumber: w.night, score: w.score, lives: w.lives, profile: w.profile, stats: w.stats, timeLeft: w.timeLeft, bonus: w.bonus };
+    return { nightNumber: w.night, score: w.score, lives: w.lives, seed: w.seed, profile: w.profile, stats: w.stats, timeLeft: w.timeLeft, bonus: w.bonus, contracts: w.contracts, contractReward: w.contractReward };
   }
   completeNight() {
     if (this.transitioning || this.world.status !== "safe") return;
@@ -621,11 +653,13 @@ class GameScene extends Phaser.Scene {
   finishRun(reason = this.world.reason) {
     if (this.transitioning) return;
     this.transitioning = true; this.resetInput(); this.saveProgress();
+    Save.write("vampRunnerCampaign", null);
     this.scene.start("Score", { score: this.world.score, nights: this.world.night - 1, reason, profile: this.world.profile });
   }
   showSunrise() {
     if (this.transitioning) return;
     this.transitioning = true; this.resetInput(); this.saveProgress();
+    Save.write("vampRunnerCampaign", null);
     const glow = this.fixed(this.add.rectangle(195, 422, 390, 844, 0xf2b575, 0.65), 80);
     this.fixed(label(this, 195, 365, "SUNRISE", 45, "#271d25").setOrigin(0.5), 81);
     this.fixed(label(this, 195, 417, "The night is over.", 20, "#271d25").setOrigin(0.5), 81);
@@ -639,9 +673,9 @@ class GameScene extends Phaser.Scene {
       if (event.kind === "jump") { Sfx.play("dash"); continue; }
       if (event.text) { this.message.setText(event.text); this.messageUntil = this.world.elapsed + 2; }
       if (event.kind === "dirt") this.saveProgress();
-      Sfx.play(event.kind === "hurt" || event.kind === "dead" ? "hit" : event.kind === "safe" ? "safe" : "blood");
+      if (!["section", "locked"].includes(event.kind)) Sfx.play(event.kind === "hurt" || event.kind === "dead" ? "hit" : event.kind === "safe" ? "safe" : "blood");
       if (event.kind === "hurt" && !preferences.reducedMotion) this.cameras.main.shake(110, 0.004);
-      if (["bite", "iv", "hurt"].includes(event.kind)) announce(event.text);
+      if (["bite", "iv", "hurt", "key", "locked", "section"].includes(event.kind)) announce(event.text);
     }
   }
   renderWorld() {
@@ -659,26 +693,72 @@ class GameScene extends Phaser.Scene {
     this.garlic.forEach((o, i) => o.setFillStyle(i < w.garlicHits ? C.red : C.line));
     this.wallet.setText(`${w.profile.dirt} GRAVE DIRT`);
     this.scoreText.setText(`${w.score.toLocaleString()} PTS`);
-    this.routeText.setText(w.iv > 0 ? `IV RUSH ${w.iv.toFixed(1)}s · PROTECTED` : `${w.level.name}   ·   CRYPT ${Math.max(0, Math.ceil((w.level.crypt.x - p.x) / 10))}m →`);
+    this.routeText.setText(w.iv > 0 ? `IV RUSH ${w.iv.toFixed(1)}s · PROTECTED` : `${w.level.theme.name.toUpperCase()} · ${Math.round(p.x / w.level.width * 100)}%`);
+    const nextKey = w.level.pickups.filter((item) => item.kind === "key" && item.active).sort((a, b) => Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
+    this.keyText.setText(nextKey ? `KEYS ${w.keys}/${w.level.requiredKeys} · ${nextKey.x < p.x ? "←" : "→"} ${Math.ceil(Math.abs(nextKey.x - p.x) / 10)}m${nextKey.y < p.y - 30 ? " ↑" : ""}` : `CRYPT OPEN · → ${Math.max(0, Math.ceil((w.level.crypt.x - p.x) / 10))}m`);
+    this.questText.setText(`TURN ${w.stats.turned}/${w.level.contracts[0].target} · DIRT ${w.stats.dirt}/${w.level.contracts[1].target}`);
+    this.cryptDoor.setAlpha(nextKey ? 0.45 : 1);
     this.message.setAlpha(w.elapsed < this.messageUntil ? 1 : 0);
     w.level.pickups.forEach((pickup, i) => {
       const sprite = this.pickups[i];
       sprite.setVisible(pickup.active);
-      sprite.y = pickup.y + (preferences.reducedMotion ? 0 : Math.sin(w.elapsed * 3 + i) * 3);
+      sprite.setPosition(pickup.x, pickup.y + (preferences.reducedMotion ? 0 : Math.sin(w.elapsed * 3 + i) * 3));
     });
     this.targetGraphic.clear();
+    this.renderEncounters();
     w.level.humans.forEach((h, i) => {
       const sprite = this.humans[i];
-      sprite.setPosition(h.x, h.y + h.h).setFlipX(h.direction < 0).setTexture(h.state === "vampire" ? "npc_glamoured" : "npc_plain");
+      sprite.setPosition(h.x, h.y + h.h).setFlipX(h.direction < 0).setTexture(h.state === "vampire" ? "npc_glamoured" : h.behavior === "priest" ? "npc_priest" : h.behavior === "hunter" ? "npc_garlic" : "npc_plain");
       if (h.state === "stunned") {
         this.targetGraphic.lineStyle(2, C.gold, 0.8); this.targetGraphic.strokeEllipse(h.x, h.y - 9, 28, 9);
       }
+      if (h.state === "human" && h.windup > 0) {
+        this.targetGraphic.lineStyle(2, C.gold); this.targetGraphic.strokeCircle(h.x, h.y - 12, 10);
+        this.targetGraphic.fillStyle(C.gold); this.targetGraphic.fillRect(h.x - 1, h.y - 18, 2, 8);
+      }
+      if (h.state === "human" && h.behavior === "priest") {
+        const phase = pulseState(w.elapsed, 3.8, h.phase);
+        this.targetGraphic.lineStyle(2, C.gold, phase === "safe" ? 0.16 : 0.9);
+        this.targetGraphic.strokeEllipse(h.x, h.y + 8, 100, 75);
+        if (phase === "active") { this.targetGraphic.fillStyle(C.gold, 0.28); this.targetGraphic.fillEllipse(h.x, h.y + 8, 100, 75); }
+      }
     });
     const nearby = targetHuman(w), biteTarget = targetHuman(w, 52, true);
-    this.hint.setText(biteTarget ? "STUNNED · BITE NOW +250" : nearby?.state === "stunned" ? "GET CLOSER TO BITE" : nearby ? "STUN THE HUMAN → THEN BITE" : p.x < 300 ? "JUMP UP TO ROOFTOPS FOR MORE DIRT" : "REACH YOUR CRYPT BEFORE SUNRISE →");
+    const section = w.level.sections[Math.min(w.level.sections.length - 1, Math.floor(p.x / 1000))];
+    this.hint.setText(biteTarget ? `BITE NOW · ${biteTarget.stunned.toFixed(1)}s` : nearby?.state === "stunned" ? "GET CLOSER TO BITE" : nearby ? "STUN → BITE · SILENCE THE THREAT" : section.hint);
     this.stunButton.bg.setAlpha(nearby && nearby.state !== "stunned" && w.stunCooldown === 0 ? 1 : 0.5);
     this.biteButton.bg.setAlpha(biteTarget ? 1 : 0.5);
     this.moveButtons.forEach(({ bg, direction }) => bg.setFillStyle([...this.held.values()].includes(direction) ? 0x384756 : C.panel));
+  }
+  renderEncounters() {
+    const w = this.world, g = this.dynamicGraphic;
+    g.clear();
+    for (const p of w.level.platforms) {
+      if (!p.motion && !p.crumble) continue;
+      if (!p.active) { g.lineStyle(1, C.muted, 0.2); g.lineBetween(p.x, p.y, p.x + p.w, p.y); continue; }
+      g.fillStyle(p.motion ? 0x427889 : p.crumbleTime > 0 ? 0xa77366 : 0x887d79);
+      g.fillRect(p.x, p.y, p.w, 12);
+      g.fillStyle(p.motion ? 0x9ed1d9 : 0xc8b39e); g.fillRect(p.x, p.y, p.w, 3);
+      if (p.crumble) {
+        g.lineStyle(2, 0x352e36); g.lineBetween(p.x + 30, p.y, p.x + 44, p.y + 10); g.lineBetween(p.x + 44, p.y + 10, p.x + 58, p.y + 2);
+        if (p.crumbleTime > 0) { g.fillStyle(C.red); g.fillRect(p.x, p.y + 14, p.w * Math.max(0, 1 - p.crumbleTime / 0.9), 3); }
+      } else {
+        g.lineStyle(2, 0x70a6b2); g.lineBetween(p.x + 8, p.y, p.x + 8, p.y - 15); g.lineBetween(p.x + p.w - 8, p.y, p.x + p.w - 8, p.y - 15);
+      }
+    }
+    w.level.hazards.forEach((h, i) => {
+      if (!h.pulse) return;
+      const phase = pulseState(w.elapsed, h.period, h.phase);
+      this.hazardSprites[i].setAlpha(phase === "safe" ? 0.18 : phase === "warning" ? 0.65 : 1);
+      if (phase !== "safe") {
+        this.targetGraphic.lineStyle(1, C.gold, 0.8); this.targetGraphic.strokeRect(h.x - h.w / 2, h.y - h.h / 2, h.w, h.h);
+        this.targetGraphic.fillStyle(C.gold, phase === "active" ? 0.5 : 0.08); this.targetGraphic.fillRect(h.x - h.w / 2, h.y - h.h / 2, h.w, h.h);
+      }
+    });
+    for (const shot of w.projectiles) {
+      this.targetGraphic.fillStyle(0xeee1bb); this.targetGraphic.fillCircle(shot.x, shot.y + 7, 7);
+      this.targetGraphic.lineStyle(2, 0x95bb7f); this.targetGraphic.lineBetween(shot.x, shot.y + 2, shot.x + 2, shot.y - 5);
+    }
   }
   update(_time, delta) {
     if (this.paused || this.transitioning) return;
@@ -706,14 +786,19 @@ class CryptScene extends Phaser.Scene {
   create() {
     this.cameras.main.setScroll(0, 0);
     vignette(this);
-    label(this, 24, 31, "SAFE UNTIL THE NEXT SUNSET", 11, "#90d9bf", true);
-    label(this, 24, 90, `NIGHT ${String(this.run.nightNumber).padStart(2, "0")} SURVIVED.`, 28);
-    label(this, 24, 137, "Rest. Grow stronger. Run again.", 17, "#acbdc9");
+    label(this, 24, 31, this.run.nightNumber % 12 === 0 ? "CAMPAIGN COMPLETE · BLOOD MOON UNLOCKED" : "SAFE UNTIL THE NEXT SUNSET", 10, "#90d9bf", true);
+    label(this, 24, 90, this.run.nightNumber % 12 === 0 ? "THE CITY IS YOURS." : `NIGHT ${String(this.run.nightNumber).padStart(2, "0")} SURVIVED.`, 28);
+    const next = CAMPAIGN[nightSettings(this.run.nightNumber + 1).chapter];
+    label(this, 24, 137, `Next: ${next.name}`, 17, "#acbdc9");
     label(this, 24, 190, this.run.score.toLocaleString(), 39);
     label(this, 25, 236, "RUN SCORE", 11, "#acbdc9", true);
     this.balance = label(this, 365, 196, "", 27, "#dfb778").setOrigin(1, 0);
     label(this, 365, 235, "GRAVE DIRT", 11, "#acbdc9", true).setOrigin(1, 0);
-    label(this, 24, 281, `${this.run.stats?.turned || 0} humans turned   ·   ${Math.ceil(this.run.timeLeft)}s spared`, 13, "#acbdc9");
+    (this.run.contracts || []).forEach((contract, i) => {
+      const value = contract.key === "untouched" ? contract.complete ? "perfect" : "missed" : `${contract.value}/${contract.target}`;
+      label(this, 24, 261 + i * 19, `${contract.complete ? "✓" : "○"} ${contract.title}: ${value}`, 12, contract.complete ? "#90d9bf" : "#a9bac8");
+      if (contract.complete) label(this, 365, 261 + i * 19, `+${contract.reward} dirt`, 12, "#dfb778").setOrigin(1, 0);
+    });
     label(this, 24, 324, "PERMANENT UPGRADES", 11, "#dfb778", true);
     this.shop = UPGRADES.map((upgrade, i) => {
       const y = 365 + i * 85;
@@ -724,21 +809,26 @@ class CryptScene extends Phaser.Scene {
     });
     this.restore = button(this, 195, 640, 342, "", () => this.restoreCoffin());
     this.saveNote = label(this, 195, 678, "", 11, "#a9bac8").setOrigin(0.5);
-    this.next = button(this, 195, 724, 342, "NEXT NIGHT →", () => this.nextNight(), true);
-    button(this, 195, 788, 342, "END RUN & RECORD SCORE", () => this.endRun());
+    this.next = button(this, 195, 724, 342, this.run.nightNumber % 12 === 0 ? "ENTER THE BLOOD MOON →" : "NEXT NIGHT →", () => this.nextNight(), true);
+    button(this, 102, 788, 158, "SAVE & QUIT", () => this.returnToMenu());
+    button(this, 280, 788, 171, "END RUN & SAVE SCORE", () => this.endRun());
     onKey(this, "keydown-ENTER", () => this.nextNight());
     this.persist();
     this.refreshShop();
     announce(`Night ${this.run.nightNumber} survived. Buy upgrades or press Enter for the next night.`);
   }
-  persist() { this.storageOK = Save.write("vampRunnerProgress", this.run.profile); }
+  persist() {
+    const progressOK = Save.write("vampRunnerProgress", this.run.profile);
+    const runOK = Save.write("vampRunnerCampaign", { version: 1, nightNumber: this.run.nightNumber + 1, score: this.run.score, lives: this.run.lives, seed: this.run.seed ?? 1 });
+    this.storageOK = progressOK && runOK;
+  }
   buy(key) {
     if (this.transitioning || !purchase(this.run.profile, key)) return;
     this.persist(); this.refreshShop(); Sfx.play("blood");
   }
   restoreCoffin() {
-    if (this.transitioning || this.run.lives >= MAX_LIVES || this.run.profile.dirt < 18) return;
-    this.run.profile.dirt -= 18; this.run.lives++;
+    if (this.transitioning || this.run.lives >= MAX_LIVES || this.run.profile.dirt < COFFIN_COST) return;
+    this.run.profile.dirt -= COFFIN_COST; this.run.lives++;
     this.persist(); this.refreshShop(); Sfx.play("safe");
   }
   refreshShop() {
@@ -749,18 +839,25 @@ class CryptScene extends Phaser.Scene {
       buy.caption.setText(level >= 3 ? "MAXED" : `${cost} DIRT`);
       buy.bg.setAlpha(level >= 3 || this.run.profile.dirt < cost ? 0.4 : 1);
     });
-    this.restore.caption.setText(this.run.lives >= MAX_LIVES ? "3 / 3 COFFINS · RESTED" : `COFFINS ${this.run.lives}/3 · RESTORE FOR 18 DIRT`);
-    this.restore.bg.setAlpha(this.run.lives >= MAX_LIVES || this.run.profile.dirt < 18 ? 0.4 : 1);
-    this.saveNote.setText(this.storageOK ? "Grave dirt and upgrades stay with you." : "Browser saving unavailable · kept for this session.");
+    this.restore.caption.setText(this.run.lives >= MAX_LIVES ? "3 / 3 COFFINS · RESTED" : `COFFINS ${this.run.lives}/3 · RESTORE FOR ${COFFIN_COST} DIRT`);
+    this.restore.bg.setAlpha(this.run.lives >= MAX_LIVES || this.run.profile.dirt < COFFIN_COST ? 0.4 : 1);
+    this.saveNote.setText(this.storageOK ? "Next night saved. You can come back later." : "Browser saving unavailable · kept for this session.");
   }
   nextNight() {
     if (this.transitioning) return;
     this.transitioning = true;
-    this.scene.start("Game", { nightNumber: this.run.nightNumber + 1, score: this.run.score, lives: this.run.lives, profile: this.run.profile });
+    this.scene.start("Game", { nightNumber: this.run.nightNumber + 1, score: this.run.score, lives: this.run.lives, seed: this.run.seed ?? 1, profile: this.run.profile });
+  }
+  returnToMenu() {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    this.persist();
+    this.scene.start("Menu");
   }
   endRun() {
     if (this.transitioning) return;
     this.transitioning = true;
+    Save.write("vampRunnerCampaign", null);
     this.scene.start("Score", { score: this.run.score, nights: this.run.nightNumber, reason: "You made it home before dawn.", profile: this.run.profile });
   }
 }
@@ -847,7 +944,7 @@ class ScoreScene extends Phaser.Scene {
       728,
       342,
       "RUN AGAIN  →",
-      () => this.scene.start("Game", { profile: this.profile }),
+      () => this.replay(),
       true,
     );
     button(this, 195, 790, 342, "BACK TO THE CITY", () =>
@@ -856,7 +953,7 @@ class ScoreScene extends Phaser.Scene {
     onKey(this, "keydown", (e) => {
       if (e.repeat) return;
       if (e.key === "Enter") {
-        this.scene.start("Game", { profile: this.profile });
+        this.replay();
         return;
       }
       if (e.key === "Escape") {
@@ -882,6 +979,10 @@ class ScoreScene extends Phaser.Scene {
     this.nameDisplay.setText(
       this.playerName.padEnd(7, "_").split("").join(" "),
     );
+  }
+  replay() {
+    Save.write("vampRunnerCampaign", null);
+    this.scene.start("Game", { seed: Math.floor(Math.random() * 0xffffffff), profile: this.profile });
   }
   pressKey(letter) {
     if (this.submitted || this.playerName.length >= 7) return;

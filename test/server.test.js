@@ -28,6 +28,7 @@ test("serves all game assets, query strings and health without exposing reposito
     "/styles.css",
     "/game.js",
     "/rules.js",
+    "/levels.js",
     "/game.js?v=1",
   ]) {
     const response = await request(path);

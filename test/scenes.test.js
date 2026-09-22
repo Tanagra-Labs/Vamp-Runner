@@ -19,6 +19,7 @@ test("Next Night works by tapping after scrolling, carries progress and allows r
   const { h, scene } = run();
   const crypt = new h.CryptScene();
   for (let n = 1; n <= 5; n++) {
+    scene.world.level.pickups.filter(p=>p.kind === "key").forEach(p=>R.collect(scene.world, p));
     scene.world.player.x = scene.world.level.crypt.x;
     scene.update(100, 16);
     assert.equal(scene.transitions.length, 1);
@@ -92,11 +93,11 @@ test("crypt purchases and coffin restoration are carried into the next night", (
   crypt.init({ nightNumber: 1, score: 1300, lives: 2, profile: { dirt: 100 }, timeLeft: 30 }); crypt.create();
   h.tap(crypt, 302, 384); h.tap(crypt, 195, 640);
   assert.equal(crypt.run.profile.upgrades.stride, 1);
-  assert.equal(crypt.run.profile.dirt, 62); assert.equal(crypt.run.lives, 3);
-  h.tap(crypt, 195, 640); assert.equal(crypt.run.profile.dirt, 62);
+  assert.equal(crypt.run.profile.dirt, 23); assert.equal(crypt.run.lives, 3);
+  h.tap(crypt, 195, 640); assert.equal(crypt.run.profile.dirt, 23);
   h.tap(crypt, 195, 724);
   assert.equal(crypt.transitions[0].data.profile.upgrades.stride, 1);
-  assert.equal(JSON.parse(h.storage.get("vampRunnerProgress")).dirt, 62);
+  assert.equal(JSON.parse(h.storage.get("vampRunnerProgress")).dirt, 23);
 });
 
 test("sunrise transition runs once and does not leave an invisible input-blocking overlay", () => {
@@ -120,7 +121,7 @@ test("score submission remains idempotent and preserves existing names", () => {
 test("blocked storage keeps the game playable and carries upgrades through replay", () => {
   const h = loadGame(); h.context.localStorage.setItem = () => { throw Error("blocked"); };
   const crypt = h.wire(new h.CryptScene());
-  crypt.init({ nightNumber: 1, score: 500, lives: 3, profile: { dirt: 20 }, timeLeft: 20 }); crypt.create();
+  crypt.init({ nightNumber: 1, score: 500, lives: 3, profile: { dirt: 45 }, timeLeft: 20 }); crypt.create();
   crypt.buy("stride"); assert.equal(crypt.storageOK, false); crypt.endRun();
   const scene = h.wire(new h.ScoreScene()); scene.init(crypt.transitions[0].data); scene.create();
   scene.submitScore(); assert.equal(scene.submitted, false); assert.equal(scene.save.caption.text, "SAVE UNAVAILABLE");

@@ -1,6 +1,6 @@
 # Vamp Runner
 
-A mobile vampire platformer from Tanagra Labs. Run and jump through the city to your crypt before sunrise. Collect blood syringes and IV power-ups, save grave dirt for upgrades, and stun humans before biting them into vampires.
+A mobile vampire platformer from Tanagra Labs. Survive a 12-night campaign across six districts, find the keys to your crypt before sunrise, and take on harder Blood Moon runs. Collect blood syringes and IV power-ups, save grave dirt for upgrades, and stun humans before biting them into vampires.
 
 ## Play locally
 
@@ -30,21 +30,29 @@ You can hold a direction with one finger and use the action buttons with another
 - Start each run with **three coffins**. Three garlic hits cost one coffin; a cross costs one coffin immediately. Brief recovery prevents a single contact from causing damage every frame.
 - Losing every coffin or running out of time triggers sunrise and ends the run. Falling costs one coffin and returns you to the most recent safe checkpoint. The clock keeps counting.
 - Blood syringes earn 100 points and heal one garlic hit. IV blood gives six seconds of protection from garlic and crosses, plus an 18% speed boost. It does not save you from falling or sunrise.
-- Stun within 78 pixels, then approach within 52 pixels and bite before the stun expires. Each turned human becomes a vampire and earns **250 points**. Humans wander, flee or approach depending on their behavior.
+- Stun within 78 pixels, then approach within 52 pixels and bite before the stun expires. Civilians earn **250 points**; hunters and priests earn **400**. Turning a hunter or priest also removes that threat.
 - Grave dirt is currency, with richer caches on optional rooftops. It earns 25 points per unit and stays with you across nights and runs.
-- At the crypt, spend dirt on permanent running-speed, stun-duration or IV-duration upgrades. Each has three levels. Restore a missing coffin for 18 dirt, up to three.
-- Each night switches to the next of three districts. The sunrise timer starts at 85 seconds and shortens to a minimum of 50; human speed increases within a fixed limit.
+- At the crypt, spend dirt on permanent running-speed, stun-duration or IV-duration upgrades. Each has three levels, costing 45, 40 or 55 dirt multiplied by the level being bought. Restore a missing coffin for **32 dirt**, up to three. Existing earned upgrades carry over.
+- Collect every **blue crypt key** before finishing a night. The HUD points toward the nearest missing key; some require climbing or boarding a ferry. Later nights require three keys.
 - Reaching the crypt earns `night × 500 + rounded-up remaining seconds × 10`. Surviving unlocks the next night with your score, coffins and upgrades intact.
 
-High scores, settings and progression are saved on the current browser/device. Existing `vampRunnerScores` entries are retained. If browser storage is blocked, play still works and upgrades remain available for the current session; the crypt indicates the saving limitation.
+High scores, settings, upgrades, grave dirt and challenge marks are saved on the current browser/device. Each crypt also saves the next night, score, coffins and route seed. Choose **Save & Quit**, then **Continue** in the menu to resume later. Saving is between nights, not mid-level. Death or **End Run & Save Score** ends that campaign checkpoint. Existing `vampRunnerScores` entries are retained. If browser storage is blocked, progress lasts for the current session; the crypt indicates the saving limitation.
 
-## Version 1.2: back to the platformer concept
+## Version 1.3: a longer hunt
 
-The previous version was a top-down maze. This version restores side-scrolling platforming, jumping, rooftop detours, stun-then-bite interactions, IV power-ups and grave-dirt upgrades.
+The campaign introduces different demands over twelve chapters: rooftop climbs, broken bridges, ledges that crumble after landing, moving canal ferries, garlic-throwing hunters, and timed cross hazards guarded by priests. Six district palettes and scenery styles distinguish the streets, roofs, gardens, canals, market and cathedral. Each chapter combines authored encounters; new hunts remix the middle sections while preserving the introductory route and each chapter's entry and exit.
+
+Hunters show a wind-up before throwing. Crosses and priests' auras warn before becoming harmful. Crumbling ledges show a countdown and return after collapsing, allowing another attempt if a coffin remains. There are safe checkpoints between encounters.
+
+Every night offers three optional challenges: turn humans, collect grave dirt, and either lose no coffins or finish with at least 65% of the starting timer left. Completed challenges award extra dirt and points. Earn all **36 permanent marks** across repeated hunts. Pause to see the current goals; the crypt shows the results. These goals are optional; keys are required.
+
+After night 12, **Blood Moon** cycles continue with remixed routes, shorter timers and faster humans. Additional hunters appear in the later campaign and throughout Blood Moon runs. Upgrades and spare coffins compete for the same dirt, while optional rooftops offer more resources at the cost of time.
+
+The side-scrolling platforming, jumping, stun-then-bite interactions, IV power-ups and grave-dirt upgrades from version 1.2 remain the core of play.
 
 **Next Night fix:** the old overlay fixed its parent container on screen while its interactive children retained world scroll factors. Phaser's input hit test then displaced the buttons after the camera moved. All screen controls now have their own zero scroll factor, and the crypt/shop has a separate scene and camera. Transition guards prevent double taps from skipping a night, and every gameplay entry resets temporary state.
 
-The actual movement, platform collisions, pickups, damage and progression run in the same fixed-step simulation in both the browser and automated tests. Phaser renders the game and handles input; it is not a second physics implementation.
+The actual movement, moving platforms, enemy attacks, collisions, pickups, damage and progression run in the same fixed-step simulation in both the browser and automated tests. Phaser renders the game and handles input; it is not a second physics implementation.
 
 ## Validation
 
@@ -53,14 +61,15 @@ npm run check
 npm test
 ```
 
-26 tests cover complete playable routes through all three layouts and later nights; climbing to rooftop IV pickups; exact garlic/cross rules; stun and bite range/timing; falling, sunrise, jump buffering and coyote time; purchases and persistence; camera-offset button taps; two-finger input; pause cleanup; five consecutive night transitions using the same scene objects; scores; and the HTTP server.
+42 tests cover all twelve chapters at three route seeds with the starting abilities; a full campaign preserving score, currency and coffins; a Blood Moon run; locked crypts and key collection; ferry passengers and attached keys; crumbling ledges; hunter wind-up, damage and interruption; cross and priest timing; save/quit/resume across fresh runtimes; old-save migration; exact garlic/cross rules; stun and bite range/timing; falling, sunrise, jump buffering and coyote time; purchases; camera-offset button taps; two-finger input; pause cleanup; five consecutive night transitions using the same scene objects; scores; and the HTTP server.
 
-Scene tests use a Node adapter and Phaser's scroll-coordinate formula. They do **not** run the actual browser renderer or device input. Before release, play at phone and desktop sizes: hold an arrow while jumping, stun then bite a human, collect rooftop blood and dirt, buy an upgrade, tap Next Night repeatedly, pause/resume, and check sound and reduced motion. The development browser blocks local previews, so live visual/device behavior still needs that playtest.
+Route tests supply movement and action inputs to the real simulation, without teleporting or granting immunity. Scene tests use a Node adapter and Phaser's scroll-coordinate formula. Neither runs the actual browser renderer or device input, and the scripted player's timing is more precise than a person's. Before release, play at phone and desktop sizes: climb for a key, ride a ferry, cross a crumbling ledge, interrupt a hunter, buy an upgrade, tap Next Night, save/quit/resume, and check two-finger input, sound and reduced motion. The development browser blocks local previews, so live visual/device behavior and human difficulty tuning still need that playtest.
 
 ## Files
 
 - `game.js`: Phaser scenes, procedural artwork, controls, feedback, crypt shop and menus.
-- `rules.js`: the browser-independent platformer simulation, level layouts and progression.
+- `levels.js`: twelve campaign chapters, encounter layouts, seeded variation and challenge goals.
+- `rules.js`: the browser-independent platformer simulation, enemy behavior and progression.
 - `index.html` / `styles.css`: responsive game frame and desktop guide.
 - `server.js`: dependency-free asset server and Railway health endpoint.
 - `test/`: gameplay, scene/input and HTTP regression checks.
