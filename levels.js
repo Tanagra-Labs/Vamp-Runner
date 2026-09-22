@@ -1,7 +1,7 @@
-/* Authored campaign chapters, assembled from distinct platforming encounters. */
+/* Hand-authored geometry and reward routes; generation only assembles safe encounters. */
 (function (root) {
   "use strict";
-  const FLOOR = 625, SECTION_WIDTH = 1000, ONE_WAY_FROM_NIGHT = 7;
+  const FLOOR = 625, ONE_WAY_FROM_NIGHT = 7;
   const THEMES = {
     quarter: { name: "Old Quarter", sky: 0x41303e, stone: 0x293742, trim: 0x8b9e98, motif: "city" },
     roofs: { name: "The High Roofs", sky: 0x303657, stone: 0x2c2d44, trim: 0xb1a0bb, motif: "spires" },
@@ -10,122 +10,145 @@
     market: { name: "Blood Market", sky: 0x50333c, stone: 0x41313a, trim: 0xd5a680, motif: "awnings" },
     cathedral: { name: "Cathedral Ward", sky: 0x443450, stone: 0x323344, trim: 0xc4b18b, motif: "spires" },
   };
+  const ferry = (x, y, w, range, period) => [x, y, w, { motion: { axis: "x", range, period, phase: -Math.PI / 2 } }];
+  const lift = (x, y, w, range, period) => [x, y, w, { motion: { axis: "y", range, period, phase: Math.PI / 2 } }];
+  const cracked = (x, y, w) => [x, y, w, { crumble: true }];
+  const bonus = (x, y, w) => [x, y, w, { bonus: true }];
+  // Decks: [left, top, width, optional properties]. Reward groups: [deck, count, dirt each].
+  // Each encounter has two reward plans. Empty decks, rich caches and trails are intentional.
+  const ENCOUNTERS = {
+    lanterns: { name: "LANTERN COURT", width: 900, skin: "brick", decks: [[230,565,220],[550,510,180]], gaps: [], key: 1, rewards: [[[0,3,1],[1,1,6]],[[0,1,5],[1,4,1]]], power: [1], heals: [0], mirror: false },
+    balconies: { name: "THE BALCONY CLIMB", width: 1190, skin: "brick", decks: [[210,535,140],[395,435,110],[560,345,200],[805,430,120],[970,530,90]], gaps: [[340,645]], key: 2, rewards: [[[0,2,1],[2,1,7]],[[1,3,1],[3,1,6]]], power: [2,3], heals: [4] },
+    sunken: { name: "SUNKEN LANE", width: 1080, skin: "beam", decks: [[200,585,130],[455,560,100],[680,600,220]], gaps: [[280,440]], key: 1, rewards: [[[0,4,1],[2,1,5]],[[1,1,6],[2,3,1]]], power: [1], heals: [2] },
+    carriage: { name: "CARRIAGE HOUSE", width: 1270, skin: "brick", decks: [[210,545,230],[500,470,240],[830,545,250]], gaps: [[410,460]], key: 1, rewards: [[[1,1,8],[2,2,1]],[[0,3,1],[2,1,7]]], power: [0,2], heals: [1] },
+    wells: { name: "THE OLD WELLS", width: 1060, skin: "stone", decks: [[220,575,86],[370,525,145],[625,585,90],[800,540,90]], gaps: [[265,160],[520,165]], key: 2, rewards: [[[1,3,1],[3,1,6]],[[0,1,5],[2,4,1]]], power: [1,3], heals: [2] },
+    sidecourt: { name: "HIDDEN COURTYARD", width: 1070, skin: "brick", decks: [[215,550,210],[465,485,260],[755,565,130],bonus(535,390,140)], gaps: [[400,390]], key: 1, detour: [0,1,3,1,2], rewards: [[[0,3,1],[3,1,8]],[[2,2,1],[3,2,4]]], power: [3], heals: [2] },
+
+    chimneys: { name: "CHIMNEY TEETH", width: 1260, skin: "brick", decks: [[210,535,120],[390,475,70],[545,395,110],[725,395,80],[865,465,150],[1065,540,80]], gaps: [[285,770]], key: 3, rewards: [[[1,1,3],[4,1,7]],[[0,2,1],[2,1,8]]], power: [2,4], heals: [5] },
+    terraces: { name: "LONG TERRACES", width: 1470, skin: "brick", decks: [[200,550,260],[535,500,120],[710,450,330],[1135,530,120]], gaps: [[405,785]], key: 2, rewards: [[[0,5,1],[2,1,6]],[[1,1,5],[3,4,1]]], power: [2], heals: [3] },
+    valley: { name: "ROOFLINE VALLEY", width: 1260, skin: "brick", decks: [[210,540,150],[410,455,120],[590,550,100],[770,470,140],[965,550,110]], gaps: [[320,695]], key: 2, rewards: [[[1,1,5],[3,1,5]],[[0,3,1],[2,1,6]]], power: [1,3], heals: [2] },
+    attics: { name: "ATTIC WINDOWS", width: 1330, skin: "beam", decks: [[200,555,140],[390,465,190],[635,365,120],[810,455,180],[1080,550,90]], gaps: [[310,805]], key: 2, rewards: [[[1,2,1],[2,1,8]],[[0,4,1],[3,1,6]]], power: [2], heals: [4] },
+    spires: { name: "THE NARROW SPIRES", width: 1110, skin: "stone", decks: [[210,560,65],[350,485,65],[485,410,90],[640,475,75],[785,550,95]], gaps: [[245,610]], key: 2, rewards: [[[0,1,3],[3,1,7]],[[1,1,5],[4,1,5]]], power: [2,3], heals: [4] },
+    scaffolds: { name: "HANGING SCAFFOLDS", width: 1510, skin: "beam", decks: [[200,550,140],[420,500,190],[695,500,210],[1000,530,160],[1270,580,80],bonus(740,405,120)], gaps: [[295,1010]], key: 2, detour: [0,1,2,5,2,3,4], rewards: [[[1,4,1],[5,1,8]],[[3,3,1],[5,1,9]]], power: [5], heals: [4] },
+
+    roots: { name: "LOW ROOTS", width: 1010, skin: "branch", decks: [[215,585,110],[400,555,150],[620,600,90],[780,560,80]], gaps: [[285,165],[580,230]], key: 2, rewards: [[[0,3,1],[3,1,6]],[[1,4,1],[2,1,5]]], power: [1], heals: [3] },
+    gravestones: { name: "FALLING GRAVESTONES", width: 1190, skin: "stone", decks: [cracked(220,570,80),cracked(350,525,110),cracked(520,580,80),cracked(680,515,100),[850,575,130]], gaps: [[270,650]], key: 2, rewards: [[[1,1,4],[4,1,6]],[[0,1,3],[3,1,7]]], power: [4], heals: [4] },
+    boughs: { name: "THE HIGH BOUGHS", width: 1370, skin: "branch", decks: [[220,550,130],[410,470,210],[675,395,150],[925,480,130],[1150,560,80]], gaps: [[315,880]], key: 2, rewards: [[[0,2,1],[2,1,8]],[[1,3,1],[3,1,7]]], power: [2], heals: [4] },
+    overgrowth: { name: "OVERGROWN ARCH", width: 1140, skin: "branch", decks: [[215,580,220],[525,530,110],[715,570,200]], gaps: [[380,390]], key: 1, rewards: [[[0,5,1],[2,1,5]],[[1,1,6],[2,4,1]]], power: [1], heals: [2] },
+    brokenroots: { name: "ROOTS & RUBBLE", width: 1490, skin: "branch", decks: [[200,565,140],cracked(430,545,100),[650,465,140],cracked(890,540,95),[1115,580,200]], gaps: [[315,905]], key: 2, rewards: [[[1,1,5],[4,3,1]],[[0,2,1],[2,1,7]]], power: [2], heals: [4] },
+    gardenwell: { name: "THE WISHING WELL", width: 1290, skin: "stone", decks: [[210,555,170],[455,490,140],[670,570,90],[870,500,120],[1065,580,70],bonus(465,400,115)], gaps: [[325,760]], key: 3, detour: [0,1,5,1,2,3,4], rewards: [[[2,1,3],[5,1,9]],[[0,3,1],[5,2,4]]], power: [5], heals: [4] },
+
+    crossing: { name: "FERRY CROSSING", width: 1060, skin: "pier", decks: [ferry(440,585,100,120,5.5),[755,535,135]], gaps: [[310,355]], key: 0, rewards: [[[0,3,1],[1,1,6]],[[0,1,6],[1,3,1]]], power: [1], heals: [1], water: true },
+    locklift: { name: "THE LOCK LIFT", width: 1190, skin: "pier", decks: [[220,575,140],lift(480,545,120,45,4.6),[650,480,165],[910,570,100]], gaps: [[325,655]], key: 1, rewards: [[[0,3,1],[2,1,7]],[[1,1,6],[3,3,1]]], power: [2], heals: [3], water: true },
+    doubleferry: { name: "TWO BOATS HOME", width: 1490, skin: "pier", decks: [[210,575,100],ferry(445,580,100,90,5),[710,535,140],ferry(1035,560,120,100,5.8),[1270,570,85]], gaps: [[280,1030]], key: 3, rewards: [[[1,1,5],[2,3,1]],[[2,1,6],[3,3,1]]], power: [2,4], heals: [4], water: true },
+    cargo: { name: "CARGO HOIST", width: 1340, skin: "pier", decks: [[215,555,150],lift(485,525,145,45,4),[725,470,200],[1040,560,110]], gaps: [[315,780]], key: 1, rewards: [[[0,4,1],[2,1,6]],[[1,1,6],[3,4,1]]], power: [2], heals: [3], water: true },
+    spillway: { name: "SPILLWAY STONES", width: 1240, skin: "stone", decks: [[225,585,80],[405,540,140],[615,585,90],[805,520,110],[1000,580,70]], gaps: [[260,780]], key: 3, rewards: [[[1,2,1],[3,1,7]],[[0,1,3],[2,1,6]]], power: [3], heals: [4], water: true },
+    moonferry: { name: "MOONLIT BARGE", width: 1350, skin: "pier", decks: [[220,560,210],ferry(670,565,120,120,5.2),[960,535,190]], gaps: [[375,650]], key: 1, rewards: [[[0,4,1],[2,1,6]],[[1,1,7],[2,3,1]]], power: [2], heals: [0], water: true },
+
+    tents: { name: "THE CANOPY ROAD", width: 1240, skin: "awning", decks: [[220,560,240],[515,500,170],[780,555,260]], gaps: [], key: 1, rewards: [[[0,4,1],[2,1,6]],[[1,1,7],[2,3,1]]], power: [1], heals: [2], hunter: true },
+    marketstair: { name: "STACKED STALLS", width: 1170, skin: "awning", decks: [[210,585,100],[350,535,90],[500,465,210],[760,520,120],[950,580,80]], gaps: [[300,680]], key: 2, rewards: [[[0,1,3],[2,1,7]],[[1,2,1],[3,1,7]]], power: [2], heals: [4], hunter: true },
+    arcade: { name: "COVERED ARCADE", width: 1370, skin: "awning", decks: [[220,540,270],[580,540,280],[950,540,220],bonus(665,445,120)], gaps: [[430,610]], key: 1, detour: [0,1,3,1,2], rewards: [[[0,4,1],[3,1,8]],[[2,3,1],[3,1,9]]], power: [3], heals: [2], hunter: true },
+    bunting: { name: "ABOVE THE BUNTING", width: 1390, skin: "awning", decks: [[220,550,130],[435,465,170],[660,390,150],[880,475,210],[1170,560,80]], gaps: [[310,900]], key: 2, rewards: [[[1,3,1],[2,1,7]],[[0,2,1],[3,1,8]]], power: [2], heals: [4], hunter: true },
+    warehouse: { name: "THE WAREHOUSE RUN", width: 1540, skin: "beam", decks: [[220,575,170],[490,515,250],[850,555,110],[1040,475,260],[1360,560,80]], gaps: [[350,1030]], key: 3, rewards: [[[1,5,1],[3,1,6]],[[0,3,1],[2,1,7]]], power: [3], heals: [2], hunter: true },
+    backalleys: { name: "BACK-ALLEY CACHE", width: 990, skin: "brick", decks: [[220,575,130],[470,560,110],[730,575,85],bonus(490,465,120)], gaps: [[310,210],[630,130]], key: 1, detour: [0,1,3,1,2], rewards: [[[0,3,1],[3,1,8]],[[2,2,1],[3,1,9]]], power: [3], heals: [2], hunter: true },
+
+    cloister: { name: "THE CLOISTER", width: 1200, skin: "stone", decks: [[230,545,160],[455,470,160],[715,545,260]], gaps: [], key: 1, rewards: [[[0,3,1],[2,1,6]],[[1,1,7],[2,3,1]]], power: [1], heals: [2], crosses: [650], priest: true },
+    pillars: { name: "SEVEN PILLARS", width: 1350, skin: "stone", decks: [[220,575,75],[350,500,95],[510,420,80],[655,500,65],[800,430,100],[975,510,80],[1125,580,70]], gaps: [[260,910]], key: 4, rewards: [[[1,1,3],[4,1,7]],[[2,1,6],[5,1,4]]], power: [4], heals: [6], priest: true },
+    belllift: { name: "BELL-TOWER HOIST", width: 1470, skin: "beam", decks: [[220,550,130],[420,455,160],lift(675,435,130,60,5),[925,395,140],[1150,490,90],[1290,580,65]], gaps: [[295,1050]], key: 2, rewards: [[[1,3,1],[3,1,7]],[[0,2,1],[2,1,8]]], power: [3], heals: [5], priest: true },
+    nave: { name: "THE EMPTY NAVE", width: 1430, skin: "stone", decks: [[215,565,240],[520,485,310],[905,555,230],[1220,590,65]], gaps: [[390,865]], key: 1, rewards: [[[0,5,1],[2,1,5]],[[1,1,8],[3,2,1]]], power: [1], heals: [2], priest: true },
+    reliquary: { name: "THE RELIQUARY", width: 1290, skin: "stone", decks: [[220,555,150],[430,465,130],[640,415,140],[850,495,160],[1090,570,80],bonus(645,345,120)], gaps: [[325,800]], key: 2, detour: [0,1,2,5,2,3,4], rewards: [[[1,2,1],[5,1,9]],[[3,3,1],[5,1,8]]], power: [5], heals: [4], priest: true },
+    ossuary: { name: "THE OSSUARY", width: 1470, skin: "stone", decks: [cracked(220,580,100),[410,540,180],cracked(670,470,130),[920,545,180],[1230,580,60]], gaps: [[275,990]], key: 2, rewards: [[[1,4,1],[3,1,6]],[[0,1,4],[2,1,6]]], power: [3], heals: [4], crosses: [1330], priest: true },
+  };
   const CAMPAIGN = [
-    { name: "First Blood", theme: "quarter", seconds: 100, keys: 1, sections: ["lane", "steps", "lane", "bridge", "market", "lane"] },
-    { name: "Above the Streets", theme: "roofs", seconds: 118, keys: 2, sections: ["steps", "roofs", "market", "steps", "roofs", "bridge", "lane"] },
-    { name: "Roots & Ruin", theme: "gardens", seconds: 120, keys: 2, sections: ["steps", "ruins", "lane", "ruins", "market", "bridge", "steps"] },
-    { name: "Still Water", theme: "canals", seconds: 130, keys: 2, sections: ["lane", "canal", "steps", "canal", "bridge", "market", "lane"] },
-    { name: "The Price of Blood", theme: "market", seconds: 122, keys: 2, sections: ["market", "steps", "market", "bridge", "roofs", "market", "steps", "lane"] },
-    { name: "The Bells Toll", theme: "cathedral", seconds: 132, keys: 2, sections: ["steps", "chapel", "roofs", "chapel", "bridge", "market", "steps", "chapel"] },
-    { name: "Graveyard Shift", theme: "quarter", seconds: 132, keys: 3, sections: ["ruins", "market", "steps", "bridge", "chapel", "roofs", "ruins", "lane"] },
-    { name: "Gutter Crown", theme: "roofs", seconds: 135, keys: 3, sections: ["roofs", "steps", "roofs", "canal", "chapel", "bridge", "roofs", "market"] },
-    { name: "The Forgotten", theme: "gardens", seconds: 140, keys: 3, sections: ["ruins", "steps", "ruins", "chapel", "market", "roofs", "ruins", "bridge", "lane"] },
-    { name: "Undertow", theme: "canals", seconds: 150, keys: 3, sections: ["canal", "bridge", "market", "canal", "steps", "ruins", "canal", "chapel", "lane"] },
-    { name: "The Procession", theme: "cathedral", seconds: 145, keys: 3, sections: ["chapel", "market", "roofs", "chapel", "canal", "ruins", "steps", "chapel", "bridge"] },
-    { name: "The Longest Night", theme: "cathedral", seconds: 158, keys: 3, sections: ["steps", "chapel", "canal", "ruins", "market", "roofs", "chapel", "bridge", "steps", "chapel"] },
+    { name: "First Blood", theme: "quarter", seconds: 112, keys: 1, sections: ["lanterns","balconies","sunken","carriage","wells","sidecourt"] },
+    { name: "Above the Streets", theme: "roofs", seconds: 146, keys: 2, sections: ["terraces","chimneys","valley","attics","spires","scaffolds","arcade"] },
+    { name: "Roots & Ruin", theme: "gardens", seconds: 144, keys: 2, sections: ["roots","gravestones","boughs","overgrowth","brokenroots","gardenwell","wells"] },
+    { name: "Still Water", theme: "canals", seconds: 160, keys: 2, sections: ["crossing","locklift","spillway","doubleferry","moonferry","cargo","roots"] },
+    { name: "The Price of Blood", theme: "market", seconds: 156, keys: 2, sections: ["tents","marketstair","backalleys","arcade","bunting","warehouse","carriage","terraces"] },
+    { name: "The Bells Toll", theme: "cathedral", seconds: 162, keys: 2, sections: ["cloister","pillars","belllift","nave","reliquary","ossuary","chimneys","cargo"] },
+    { name: "Graveyard Shift", theme: "quarter", seconds: 148, keys: 3, sections: ["wells","sidecourt","lanterns","carriage","backalleys","brokenroots","valley","cloister"] },
+    { name: "Gutter Crown", theme: "roofs", seconds: 162, keys: 3, sections: ["chimneys","spires","attics","scaffolds","valley","moonferry","belllift","bunting"] },
+    { name: "The Forgotten", theme: "gardens", seconds: 170, keys: 3, sections: ["gravestones","roots","boughs","overgrowth","brokenroots","gardenwell","ossuary","warehouse","spillway"] },
+    { name: "Undertow", theme: "canals", seconds: 185, keys: 3, sections: ["crossing","doubleferry","locklift","moonferry","cargo","spillway","arcade","gardenwell","scaffolds"] },
+    { name: "The Procession", theme: "cathedral", seconds: 176, keys: 3, sections: ["pillars","cloister","belllift","nave","reliquary","ossuary","attics","marketstair","boughs"] },
+    { name: "The Longest Night", theme: "cathedral", seconds: 190, keys: 3, sections: ["chimneys","doubleferry","gravestones","bunting","cargo","reliquary","scaffolds","brokenroots","pillars","nave"] },
   ];
   const HINTS = {
-    lane: "Choose the street or the rooftops.",
-    steps: "Climb the stairs. Keys glow blue.",
-    roofs: "Stay high. The street falls away.",
-    ruins: "Cracked ledges collapse. Keep moving.",
-    canal: "Ride the ferry. Jump to the far bank.",
-    market: "Hunters throw garlic. Jump or stun them.",
-    chapel: "Crosses flash before they strike. Wait, then go.",
-    bridge: "Short landings. Time each jump.",
+    brick: "Read the roofline. Every landing is different.", beam: "Mind the gaps between the beams.",
+    branch: "Follow the branches. Watch the low landings.", stone: "Short ledges. Line up your next jump.",
+    awning: "Take the canopies. Hunt for high caches.", pier: "Ride the platforms. Wait for your landing.",
   };
   function random(seed) {
     let state = (seed >>> 0) || 1;
     return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+  }
+  function shuffle(array, rng) {
+    for (let i = array.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [array[i], array[j]] = [array[j], array[i]]; }
+    return array;
   }
   function nightSettings(night = 1) {
     const n = Number.isFinite(night) ? Math.max(1, Math.floor(night)) : 1;
     const chapter = (n - 1) % CAMPAIGN.length, cycle = Math.floor((n - 1) / CAMPAIGN.length), spec = CAMPAIGN[chapter];
     return { night: n, chapter, cycle, variant: chapter, oneWay: n >= ONE_WAY_FROM_NIGHT, duration: spec.seconds - Math.min(28, cycle * 7), speed: Math.min(1.55, 1 + chapter * 0.03 + cycle * 0.07) };
   }
+  function sectionAt(level, x) { return level.sections.find((s) => x < s.end) || level.sections[level.sections.length - 1]; }
   function buildLevel(night = 1, seed = 1) {
-    const settings = nightSettings(night), spec = CAMPAIGN[settings.chapter];
-    const rng = random((seed >>> 0) + settings.night * 7919);
+    const settings = nightSettings(night), spec = CAMPAIGN[settings.chapter], rng = random((seed >>> 0) + settings.night * 7919);
     const types = spec.sections.slice();
-    // Keep the introductory approach and final encounter. Remix the middle.
-    if (settings.night > 1) for (let i = types.length - 2; i > 1; i--) {
-      const j = 1 + Math.floor(rng() * i); [types[i], types[j]] = [types[j], types[i]];
-    }
+    if (settings.night > 1) types.splice(1, types.length - 2, ...shuffle(types.slice(1, -1), rng));
     const platforms = [], gaps = [], pickups = [], hazards = [], humans = [], sections = [], checkpoints = [80];
     const keySections = settings.chapter === 0 ? [1] : Array.from({ length: spec.keys }, (_, i) => Math.floor((i + 1) * types.length / (spec.keys + 1)));
+    const powerSections = settings.night === 1 ? [1,3] : shuffle(types.map((_,i) => i), rng).slice(0, 2);
+    const healingSections = shuffle(types.map((_,i) => i), rng).slice(0, Math.ceil(types.length / 2));
     const platform = (x, y, w, extra = {}) => {
       const p = { id: platforms.length, x, y, baseX: x, baseY: y, w, h: 16, active: true, crumbleTime: 0, respawn: 0, ...extra };
+      if (p.motion) { const m = p.motion; p[m.axis] += Math.sin(m.phase) * m.range; }
       platforms.push(p); return p;
     };
     const pickup = (kind, x, y, value = 1, extra = {}) => {
       const p = { id: pickups.length, kind, x, y, value, active: true, ...extra }; pickups.push(p); return p;
     };
-    const person = (x, behavior = "wander", y = FLOOR, min = x - 75, max = x + 75) => {
-      humans.push({ id: humans.length, x, y: y - 38, w: 24, h: 38, min, max, direction: rng() > 0.5 ? 1 : -1, behavior, state: "human", stunned: 0, cooldown: 1.4 + rng(), windup: 0, phase: rng() * 3.8 });
-    };
-    const hazard = (kind, x, extra = {}) => hazards.push({ kind, x, y: FLOOR - 18, w: 26, h: 36, ...extra });
+    const person = (x, behavior, radius = 30) => humans.push({ id: humans.length, x, y: FLOOR - 38, w: 24, h: 38, min: x - radius, max: x + radius, direction: rng() > 0.5 ? 1 : -1, behavior, state: "human", stunned: 0, cooldown: 1.4 + rng(), windup: 0, phase: rng() * 3.8 });
+    let start = 0;
     types.forEach((type, index) => {
-      const start = index * SECTION_WIDTH, end = start + SECTION_WIDTH;
-      const section = { type, start, end, name: type.toUpperCase(), hint: HINTS[type], index };
+      const e = ENCOUNTERS[type], mirrored = e.mirror !== false && (settings.chapter >= 6 || (settings.chapter > 0 && rng() < 0.35));
+      const approach = settings.night === 1 ? 0 : Math.floor(rng() * 3) * 35;
+      const end = start + e.width + approach;
+      const xPoint = (x) => start + approach + (mirrored ? e.width - x : x);
+      const section = { type, start, end, name: e.name, hint: HINTS[e.skin], index, mirrored, route: [], detour: [] };
+      if (e.water) section.hint = "Water below. Wait for the next landing.";
+      if (e.decks.some(d => d[3]?.crumble)) section.hint = "Cracked ledges collapse. Keep moving.";
+      if (e.decks.some(d => d[3]?.motion?.axis === "y")) section.hint = "Ride the lift. Jump when the heights line up.";
+      if (e.detour) section.hint = "High caches reward an extra climb.";
       sections.push(section); checkpoints.push(start + 80);
-      let keyAnchor;
-      const roof = (x, y, w, extra) => platform(start + x, y, w, extra);
-      const gap = (x, width) => gaps.push({ x: start + x, width, water: type === "canal" });
-      if (type === "lane" || type === "market" || type === "chapel") {
-        roof(250, 535, 155); roof(420, 445, 190); roof(670, 535, 150);
-        keyAnchor = { x: start + 540, y: 418 };
-        if (type === "lane") hazard("garlic", start + 725);
-        if (type === "market") {
-          person(start + 545, "hunter", FLOOR, start + 475, start + 620);
-          hazard("garlic", start + 850);
-        }
-        if (type === "chapel") {
-          hazard("cross", start + 340, { pulse: true, period: 3.8, phase: rng() * 3.8, y: FLOOR - 57, h: 114, w: 34 });
-          hazard("cross", start + 795, { pulse: true, period: 4.4, phase: rng() * 4.4, y: FLOOR - 57, h: 114, w: 34 });
-          person(start + 650, "priest", FLOOR, start + 620, start + 720);
-        }
-      } else if (type === "steps") {
-        roof(220, 535, 160); roof(390, 445, 160); roof(570, 355, 175); roof(785, 445, 145);
-        keyAnchor = { x: start + 665, y: 328 };
-        hazard("garlic", start + 850);
-      } else if (type === "roofs") {
-        gap(340, 410);
-        roof(215, 535, 160); roof(400, 445, 155); roof(600, 445, 155); roof(785, 535, 145);
-        keyAnchor = { x: start + 670, y: 418 };
-      } else if (type === "canal") {
-        gap(310, 355);
-        const ferry = roof(440, 585, 90, { motion: { axis: "x", range: 120, period: 5.5, phase: -Math.PI / 2 } });
-        keyAnchor = { x: ferry.x + 45, y: 558, platform: ferry.id };
-        roof(735, 535, 145);
-        pickup("iv", start + 800, 509);
-      } else if (type === "ruins") {
-        gap(325, 360);
-        roof(280, 575, 96, { crumble: true }); roof(430, 525, 100, { crumble: true }); roof(585, 575, 100, { crumble: true });
-        keyAnchor = { x: start + 480, y: 498 };
-        roof(760, 535, 130);
-      } else if (type === "bridge") {
-        gap(245, 90); gap(475, 100); gap(710, 110);
-        roof(375, 533, 95); roof(605, 533, 100);
-        keyAnchor = { x: start + 655, y: 506 };
+      const decks = e.decks.map(([x,y,w,extra = {}]) => platform(xPoint(mirrored ? x + w : x), y, w, { skin: e.skin, section: index, ...extra, ...(extra.motion ? { motion: { ...extra.motion, phase: extra.motion.axis === "x" && mirrored ? Math.PI / 2 : extra.motion.phase } } : {}) }));
+      let order = decks.map((p,i) => i).filter(i => !decks[i].bonus);
+      if (mirrored) order.reverse();
+      section.route = order.map(i => decks[i].id);
+      section.detour = e.detour ? (mirrored ? e.detour.slice().reverse() : e.detour).map(i => decks[i].id) : section.route.slice();
+      for (const [x,w] of e.gaps) gaps.push({ x: xPoint(mirrored ? x + w : x), width: w, water: !!e.water });
+      const anchored = (kind, deckIndex, value = 1, fraction = 0.5, offsetY = -25) => {
+        const p = decks[deckIndex], offsetX = p.w * fraction;
+        return pickup(kind, p.x + offsetX, p.y + offsetY, value, { deckId: p.id, ...(p.motion ? { platform: p.id, offsetX, offsetY } : {}) });
+      };
+      if (keySections.includes(index)) section.keyId = anchored("key", e.key, 1, 0.5, -27).id;
+      const plan = e.rewards[settings.night === 1 ? 0 : Math.floor(rng() * e.rewards.length)];
+      for (const [deckIndex, count, value] of plan) for (let j = 0; j < count; j++) {
+        const q = count === 1 ? (deckIndex === e.key && section.keyId !== undefined ? 0.22 : 0.5) : 0.15 + 0.7 * j / (count - 1);
+        anchored("dirt", deckIndex, value, q);
       }
-      if (keySections.includes(index)) {
-        const key = pickup("key", keyAnchor.x, keyAnchor.y, 1, keyAnchor.platform === undefined ? {} : { platform: keyAnchor.platform });
-        section.keyId = key.id;
-      }
-      for (const p of platforms.filter((p) => p.x >= start && p.x < end && !p.motion)) {
-        pickup("dirt", p.x + p.w * 0.3, p.y - 23, 2);
-        pickup("dirt", p.x + p.w * 0.7, p.y - 23, 2);
-      }
-      [140, 180].forEach((x) => pickup("dirt", start + x, FLOOR - 22));
-      pickup("syringe", start + 945, FLOOR - 25);
-      if (index % 3 === 1 && type !== "canal") pickup("iv", keyAnchor.x - 45, keyAnchor.y);
-      if (settings.chapter === 0 && index === 0) pickup("iv", start + 530, 418);
-      if (!['canal', 'roofs', 'ruins'].includes(type)) person(start + 165, ["wander", "flee", "brave"][index % 3], FLOOR, start + 105, start + 210);
-      if ((settings.chapter >= 6 || settings.cycle) && index % 3 === 2 && type !== "chapel") person(start + 900, "hunter", FLOOR, start + 860, start + 930);
+      if (powerSections.includes(index)) anchored("iv", e.power[Math.floor(rng() * e.power.length)], 1, 0.78, -32);
+      if (healingSections.includes(index)) anchored("syringe", e.heals[Math.floor(rng() * e.heals.length)], 1, 0.2, -29);
+      person(start + 140, ["wander", "flee", "brave"][index % 3]);
+      if (e.hunter || ((settings.chapter >= 6 || settings.cycle) && index % 3 === 2 && !e.priest)) person(end - 115, "hunter");
+      // Leave a clear landing before the priest's aura so ground combat is a choice.
+      if (e.priest) person(end - 65, "priest", 15);
+      for (const x of e.crosses || []) hazards.push({ kind: "cross", x: xPoint(x), y: FLOOR - 57, w: 34, h: 114, pulse: true, period: 3.8 + rng() * 0.6, phase: rng() * 3.8 });
+      if (index % 3 === 0 && !e.priest) hazards.push({ kind: "garlic", x: end - 90, y: FLOOR - 18, w: 26, h: 36 });
+      start = end;
     });
-    const width = types.length * SECTION_WIDTH + 450;
-    // Carve real ground gaps; all encounter boundaries and checkpoints are solid.
-    gaps.sort((a, b) => a.x - b.x);
+    const width = start + 450;
+    gaps.sort((a,b) => a.x - b.x);
     let edge = 0;
     for (const g of gaps) { platform(edge, FLOOR, g.x - edge, { ground: true, h: 120 }); edge = g.x + g.width; }
     platform(edge, FLOOR, width - edge, { ground: true, h: 120 });
@@ -134,13 +157,10 @@
       { key: "dirt", target: 32 + Math.floor(settings.chapter / 3) * 8, reward: 14, title: "Collect grave dirt" },
       settings.chapter % 2 ? { key: "time", target: Math.round(settings.duration * 0.65), reward: 18, title: "Seconds to spare" } : { key: "untouched", target: 0, reward: 18, title: "Lose no coffins" },
     ];
-    const gates = settings.oneWay ? sections.slice(1).map((section) => ({
-      x: section.start, checkpoint: section.start + 80,
-      keyIds: sections.slice(0, section.index).filter((s) => s.keyId !== undefined).map((s) => s.keyId),
-    })) : [];
+    const gates = settings.oneWay ? sections.slice(1).map((section) => ({ x: section.start, checkpoint: section.start + 80, keyIds: sections.slice(0,section.index).filter(s => s.keyId !== undefined).map(s => s.keyId) })) : [];
     return { ...settings, seed: seed >>> 0, name: spec.name, theme: THEMES[spec.theme], width, platforms, gaps, pickups, hazards, humans, sections, checkpoints, gates, contracts, requiredKeys: spec.keys, crypt: { x: width - 110, y: FLOOR } };
   }
-  const api = { FLOOR, SECTION_WIDTH, ONE_WAY_FROM_NIGHT, CAMPAIGN, THEMES, HINTS, nightSettings, buildLevel };
+  const api = { FLOOR, ONE_WAY_FROM_NIGHT, CAMPAIGN, THEMES, ENCOUNTERS, HINTS, nightSettings, sectionAt, buildLevel };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.VampLevels = api;
 })(typeof window !== "undefined" ? window : this);

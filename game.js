@@ -2,7 +2,7 @@
 /* global Phaser, VampRules */
 const {
   FLOOR, MAX_LIVES, STEP, UPGRADES, COFFIN_COST, GATE_HALF_WIDTH, CAMPAIGN, createWorld, step,
-  cleanProgress, cleanRun, purchase, targetHuman, cleanScores, contractResults, pulseState, gateState, nightSettings,
+  cleanProgress, cleanRun, purchase, targetHuman, cleanScores, contractResults, pulseState, gateState, nightSettings, sectionAt,
 } = VampRules;
 const GAME_W = 390,
   GAME_H = 844;
@@ -521,6 +521,40 @@ class GameScene extends Phaser.Scene {
     const level = this.world.level, g = this.add.graphics().setDepth(1);
     for (const p of level.platforms) {
       if (p.motion || p.crumble) continue;
+      if (p.bonus) {
+        // A cache balcony must leave the lower route visible beneath it.
+        g.fillStyle(0x364553); g.fillRoundedRect(p.x, p.y, p.w, 14, 3);
+        g.fillStyle(level.theme.trim); g.fillRect(p.x, p.y, p.w, 4);
+        g.lineStyle(3, 0x927b5c);
+        g.lineBetween(p.x + 8, p.y + 14, p.x + 25, p.y + 28);
+        g.lineBetween(p.x + p.w - 8, p.y + 14, p.x + p.w - 25, p.y + 28);
+        continue;
+      }
+      if (!p.ground && p.skin !== "brick") {
+        if (p.skin === "branch") {
+          g.fillStyle(0x65564a); g.fillRoundedRect(p.x, p.y, p.w, 13, 5);
+          g.lineStyle(4, 0x65564a); g.lineBetween(p.x + p.w * 0.25, p.y + 12, p.x + p.w * 0.5, p.y + 55);
+          g.fillStyle(0x91a879); g.fillRect(p.x, p.y, p.w, 3);
+          for (let x = p.x + 12; x < p.x + p.w; x += 32) g.fillEllipse(x, p.y + 15, 18, 7);
+        } else if (p.skin === "awning") {
+          g.fillStyle(0x786150); g.fillRect(p.x + 9, p.y + 10, 5, FLOOR - p.y - 10); g.fillRect(p.x + p.w - 14, p.y + 10, 5, FLOOR - p.y - 10);
+          for (let x = p.x, stripe = 0; x < p.x + p.w; x += 22, stripe++) {
+            g.fillStyle(stripe % 2 ? 0xc7ac88 : 0xa24e67); g.fillRect(x, p.y, Math.min(22, p.x + p.w - x), 15);
+          }
+          g.fillStyle(0xe0c8a3); g.fillRect(p.x, p.y, p.w, 3);
+        } else if (p.skin === "stone") {
+          g.fillStyle(level.theme.stone); g.fillRect(p.x + p.w * 0.27, p.y + 13, p.w * 0.46, FLOOR - p.y - 13);
+          g.fillStyle(0x56606b); g.fillRect(p.x, p.y, p.w, 16);
+          g.fillStyle(level.theme.trim); g.fillRect(p.x, p.y, p.w, 4);
+        } else {
+          g.fillStyle(p.skin === "pier" ? 0x527f86 : 0x847060); g.fillRect(p.x, p.y, p.w, 14);
+          g.fillStyle(p.skin === "pier" ? 0xafd1cd : 0xd0b796); g.fillRect(p.x, p.y, p.w, 3);
+          g.lineStyle(2, 0x756f62, 0.6);
+          for (const x of [p.x + 10, p.x + p.w - 10]) g.lineBetween(x, p.y + 14, x, p.skin === "pier" ? FLOOR + 32 : p.y + 38);
+          for (let x = p.x + 12; x < p.x + p.w - 5; x += 22) g.lineBetween(x, p.y + 4, x, p.y + 13);
+        }
+        continue;
+      }
       g.fillStyle(p.ground ? level.theme.stone : 0x18232e);
       g.fillRect(p.x, p.y, p.w, p.ground ? 120 : FLOOR - p.y);
       g.fillStyle(level.theme.trim);
@@ -535,12 +569,13 @@ class GameScene extends Phaser.Scene {
       }
     }
     for (const gap of level.gaps) {
+      g.fillStyle(0x060a12); g.fillRect(gap.x, FLOOR + 5, gap.width, 108);
       if (gap.water) {
         g.fillStyle(0x2a6579, 0.6); g.fillRect(gap.x, FLOOR + 18, gap.width, 100);
         g.lineStyle(1, 0x73b9c6, 0.6);
         for (let x = gap.x + 8; x < gap.x + gap.width - 18; x += 35) g.lineBetween(x, FLOOR + 26, x + 18, FLOOR + 26);
       }
-      g.fillStyle(C.red, 0.4); g.fillRect(gap.x - 8, FLOOR, 8, 5); g.fillRect(gap.x + gap.width, FLOOR, 8, 5);
+      g.fillStyle(C.red, 0.85); g.fillTriangle(gap.x - 12, FLOOR - 8, gap.x + 5, FLOOR, gap.x - 12, FLOOR + 8); g.fillTriangle(gap.x + gap.width + 12, FLOOR - 8, gap.x + gap.width - 5, FLOOR, gap.x + gap.width + 12, FLOOR + 8);
       label(this, gap.x + gap.width / 2, FLOOR + 37, "↓", 17, "#c9758a").setOrigin(0.5);
     }
     const crypt = level.crypt;
@@ -549,7 +584,11 @@ class GameScene extends Phaser.Scene {
     g.fillStyle(0x091c19); g.fillRoundedRect(crypt.x - 34, FLOOR - 92, 68, 92, 30);
     this.cryptDoor = this.add.image(crypt.x, FLOOR - 40, "shelter").setDisplaySize(55, 72).setDepth(2);
     label(this, crypt.x, FLOOR - 174, "YOUR CRYPT", 13, "#90d9bf", true).setOrigin(0.5);
-    this.pickups = level.pickups.map((p) => this.add.image(p.x, p.y, p.kind).setDepth(5).setDisplaySize(p.kind === "dirt" ? 27 : 34, p.kind === "dirt" ? 27 : 34));
+    this.pickups = level.pickups.map((p) => {
+      const size = p.kind === "dirt" ? p.value >= 5 ? 34 : 22 : 34;
+      return this.add.image(p.x, p.y, p.kind).setDepth(5).setDisplaySize(size, size);
+    });
+    this.pickupValues = level.pickups.map((p) => p.kind === "dirt" && p.value > 1 ? label(this, p.x, p.y - 26, `+${p.value}`, 11, "#f4d798", true).setOrigin(0.5).setDepth(6) : null);
     this.hazardSprites = level.hazards.map((h) => this.add.image(h.x, h.y, h.kind).setDepth(6).setDisplaySize(36, 40));
     this.humans = level.humans.map((h) => this.add.image(h.x, h.y + h.h, "npc_plain").setOrigin(0.5, 1).setDisplaySize(38, 42).setDepth(7));
     this.dynamicGraphic = this.add.graphics().setDepth(3);
@@ -706,6 +745,7 @@ class GameScene extends Phaser.Scene {
       const sprite = this.pickups[i];
       sprite.setVisible(pickup.active);
       sprite.setPosition(pickup.x, pickup.y + (preferences.reducedMotion ? 0 : Math.sin(w.elapsed * 3 + i) * 3));
+      this.pickupValues[i]?.setVisible(pickup.active).setPosition(pickup.x, pickup.y - 26);
     });
     this.targetGraphic.clear();
     this.renderEncounters();
@@ -727,7 +767,7 @@ class GameScene extends Phaser.Scene {
       }
     });
     const nearby = targetHuman(w), biteTarget = targetHuman(w, 52, true);
-    const section = w.level.sections[Math.min(w.level.sections.length - 1, Math.floor(p.x / 1000))];
+    const section = sectionAt(w.level, p.x);
     const nextGate = w.level.gates.find((gate) => gate.x > p.x && gate.x - p.x < 210);
     const gateHint = nextGate ? gateState(w, nextGate) === "locked" ? "KEY FIRST · THE GATE IS LOCKED" : "NO RETURN · CROSS TO SEAL THIS SECTION" : null;
     this.hint.setText(biteTarget ? `BITE NOW · ${biteTarget.stunned.toFixed(1)}s` : nearby?.state === "stunned" ? "GET CLOSER TO BITE" : nearby ? "STUN → BITE · SILENCE THE THREAT" : gateHint || section.hint);
@@ -756,6 +796,11 @@ class GameScene extends Phaser.Scene {
     });
     for (const p of w.level.platforms) {
       if (!p.motion && !p.crumble) continue;
+      if (p.motion?.axis === "y") {
+        g.lineStyle(2, 0xa99165, 0.5);
+        for (const x of [p.x + 9, p.x + p.w - 9]) g.lineBetween(x, p.baseY - p.motion.range - 42, x, p.baseY + p.motion.range + 20);
+        g.lineStyle(2, C.gold); g.strokeCircle(p.x + p.w / 2, p.baseY - p.motion.range - 24, 10);
+      }
       if (!p.active) { g.lineStyle(1, C.muted, 0.2); g.lineBetween(p.x, p.y, p.x + p.w, p.y); continue; }
       g.fillStyle(p.motion ? 0x427889 : p.crumbleTime > 0 ? 0xa77366 : 0x887d79);
       g.fillRect(p.x, p.y, p.w, 12);

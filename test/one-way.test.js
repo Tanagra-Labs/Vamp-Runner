@@ -8,9 +8,10 @@ test("early nights allow backtracking, while night seven and Blood Moon introduc
   for (let n = 1; n < 7; n++) assert.equal(R.buildLevel(n).gates.length, 0);
   for (const n of [7, 12, 13, 25]) assert.ok(R.buildLevel(n).gates.length > 0);
   const w = R.createWorld({ nightNumber: 6 });
-  w.player.x = 980;
-  tick(w, 0.5, { move: 1 }); assert.ok(w.player.x > 1000);
-  tick(w, 1, { move: -1 }); assert.ok(w.player.x < 980);
+  const boundary = w.level.sections[1].start;
+  w.player.x = boundary - 20;
+  tick(w, 0.5, { move: 1 }); assert.ok(w.player.x > boundary);
+  tick(w, 1, { move: -1 }); assert.ok(w.player.x < boundary - 20);
   assert.equal(w.returnLimit, 0);
 });
 

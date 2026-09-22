@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   const Levels = typeof module !== "undefined" && module.exports ? require("./levels") : root.VampLevels;
-  const { FLOOR, CAMPAIGN, nightSettings, buildLevel } = Levels;
+  const { FLOOR, CAMPAIGN, nightSettings, sectionAt, buildLevel } = Levels;
   const GRAVITY = 1450, JUMP_SPEED = 600, PLAYER_SPEED = 220;
   const MAX_LIVES = 3, GARLIC_HITS_PER_LIFE = 3, STEP = 1 / 120, COFFIN_COST = 32;
   const GATE_HALF_WIDTH = 12;
@@ -197,7 +197,7 @@
     for (const pickup of world.level.pickups) {
       if (pickup.platform !== undefined) {
         const p = world.level.platforms[pickup.platform];
-        pickup.x = p.x + p.w / 2; pickup.y = p.y - 27;
+        pickup.x = p.x + (pickup.offsetX ?? p.w / 2); pickup.y = p.y + (pickup.offsetY ?? -27);
       }
     }
   }
@@ -292,7 +292,7 @@
     }
     if (world.status !== "playing") return;
     for (const pickup of world.level.pickups) if (pickup.active && overlap(p, { x: pickup.x, y: pickup.y - 13, w: 26, h: 26 })) collect(world, pickup);
-    const section = Math.min(world.level.sections.length - 1, Math.floor(p.x / Levels.SECTION_WIDTH));
+    const section = sectionAt(world.level, p.x).index;
     if (world.lastSection !== section) {
       if (world.lastSection >= 0) world.events.push({ kind: "section", text: world.level.sections[section].hint });
       world.lastSection = section;
@@ -310,7 +310,7 @@
       .map((s) => ({ name: s.name.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 7) || "ANON", score: Math.floor(s.score) }))
       .sort((a, b) => b.score - a.score).slice(0, 10);
   }
-  const api = { FLOOR, GRAVITY, JUMP_SPEED, PLAYER_SPEED, MAX_LIVES, GARLIC_HITS_PER_LIFE, STEP, COFFIN_COST, GATE_HALF_WIDTH, CAMPAIGN, UPGRADES, cleanProgress, cleanRun, purchase, nightSettings, buildLevel, createWorld, step, hurt, collect, targetHuman, stun, bite, finishNight, contractResults, pulseState, gateState, cleanScores };
+  const api = { FLOOR, GRAVITY, JUMP_SPEED, PLAYER_SPEED, MAX_LIVES, GARLIC_HITS_PER_LIFE, STEP, COFFIN_COST, GATE_HALF_WIDTH, CAMPAIGN, UPGRADES, cleanProgress, cleanRun, purchase, nightSettings, sectionAt, buildLevel, createWorld, step, hurt, collect, targetHuman, stun, bite, finishNight, contractResults, pulseState, gateState, cleanScores };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.VampRules = api;
 })(typeof window !== "undefined" ? window : this);

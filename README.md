@@ -38,7 +38,24 @@ You can hold a direction with one finger and use the action buttons with another
 
 High scores, settings, upgrades, grave dirt and challenge marks are saved on the current browser/device. Each crypt also saves the next night, score, coffins and route seed. Choose **Save & Quit**, then **Continue** in the menu to resume later. Saving is between nights, not mid-level. Death or **End Run & Save Score** ends that campaign checkpoint. Existing `vampRunnerScores` entries are retained. If browser storage is blocked, progress lasts for the current session; the crypt indicates the saving limitation.
 
-## Version 1.3: a longer hunt
+## Version 1.4: routes with their own shape
+
+The campaign now draws from **36 authored encounters**, replacing the small pool of repeating stair patterns. Every night uses different encounter shapes without repeating one inside that night. Section lengths, landing widths, jump heights and gaps vary; hints and one-way gates follow the actual boundaries.
+
+| District | Platforming character |
+| --- | --- |
+| Old Quarter | Broad courtyards, balcony climbs, sunken lanes and short well crossings |
+| High Roofs | Narrow chimneys and spires, long terraces, descending roof valleys and hanging scaffolds |
+| Hollow Gardens | Low roots, high boughs, collapsing gravestones and uneven rubble |
+| Drowned Canals | Ferry transfers, vertical lock lifts, cargo hoists and spillway stones |
+| Blood Market | Wide canopies, stacked stalls, warehouse jumps and back-alley caches |
+| Cathedral Ward | Narrow pillars, high bell lifts, long nave platforms and reliquary climbs |
+
+Each encounter has two authored dirt patterns: small trails, richer caches and intentionally empty ledges. Six optional cache climbs offer extra dirt; their balconies leave the lower landing visible. Larger caches display their value. IVs appear in two selected encounters per night, and blood syringes appear in roughly half, with locations chosen for the route. Ferry and lift rewards stay attached at their individual positions.
+
+The opening night teaches a stable route. Later nights remix section order and selected directions; the second half of the campaign combines districts and reverses most encounters, changing the approach to each landing. Timers account for the longer routes. Required keys remain on the main path, while high caches offer a reason to explore before committing through a gate.
+
+## The twelve-night hunt
 
 The campaign introduces different demands over twelve chapters: rooftop climbs, broken bridges, ledges that crumble after landing, moving canal ferries, garlic-throwing hunters, and timed cross hazards guarded by priests. Six district palettes and scenery styles distinguish the streets, roofs, gardens, canals, market and cathedral. Each chapter combines authored encounters; new hunts remix the middle sections while preserving the introductory route and each chapter's entry and exit.
 
@@ -63,7 +80,7 @@ npm run check
 npm test
 ```
 
-46 tests cover all twelve chapters at three route seeds with the starting abilities; a full campaign preserving score, currency and coffins; a Blood Moon run; one-way gates, missed-key protection and safe fall recovery; locked crypts and key collection; ferry passengers and attached keys; crumbling ledges; hunter wind-up, damage and interruption; cross and priest timing; save/quit/resume across fresh runtimes; old-save migration; exact garlic/cross rules; stun and bite range/timing; falling, sunrise, jump buffering and coyote time; purchases; camera-offset button taps; two-finger input; pause cleanup; five consecutive night transitions using the same scene objects; scores; and the HTTP server.
+51 tests cover all twelve chapters at three route seeds with the starting abilities; all six optional cache climbs in both directions; distinct geometry and reward placement; vertical hoist passengers and separate reward offsets; hints at variable section boundaries; a full campaign preserving score, currency and coffins; a Blood Moon run; one-way gates, missed-key protection and safe fall recovery; locked crypts and key collection; ferry passengers and attached keys; crumbling ledges; hunter wind-up, damage and interruption; cross and priest timing; save/quit/resume across fresh runtimes; old-save migration; exact garlic/cross rules; stun and bite range/timing; falling, sunrise, jump buffering and coyote time; purchases; camera-offset button taps; two-finger input; pause cleanup; five consecutive night transitions using the same scene objects; scores; and the HTTP server.
 
 Route tests supply movement and action inputs to the real simulation, without teleporting or granting immunity. Scene tests use a Node adapter and Phaser's scroll-coordinate formula. Neither runs the actual browser renderer or device input, and the scripted player's timing is more precise than a person's. Before release, play at phone and desktop sizes: climb for a key, ride a ferry, cross a crumbling ledge, interrupt a hunter, buy an upgrade, tap Next Night, save/quit/resume, and check two-finger input, sound and reduced motion. The development browser blocks local previews, so live visual/device behavior and human difficulty tuning still need that playtest.
 
