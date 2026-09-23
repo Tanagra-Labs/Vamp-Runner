@@ -895,6 +895,11 @@ class BatScene extends Phaser.Scene {
   constructor() { super("Bat"); }
   init(data = {}) { this.runData = data; }
   fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
+  control(...args) {
+    const item = button(this, ...args);
+    this.fixed(item.bg, 60); this.fixed(item.caption, 61);
+    return item;
+  }
   create() {
     this.flight = VampBat.createFlight(this.runData);
     this.paused = false; this.transitioning = false; this.accumulator = 0;
@@ -914,21 +919,22 @@ class BatScene extends Phaser.Scene {
     this.clock = this.fixed(label(this, 20, 53, "", 18, "#eee5d3", true));
     this.statusText = this.fixed(label(this, 20, 89, "", 11, "#90d9bf", true));
     this.phaseText = this.fixed(label(this, 195, 132, "Reach the open window.", 20).setOrigin(0.5));
-    this.note = this.fixed(label(this, 195, 166, "Hold to rise. Release to descend.", 12, "#acbdc9").setOrigin(0.5));
+    this.note = this.fixed(label(this, 195, 166, "You fly right automatically.", 12, "#acbdc9").setOrigin(0.5).setWordWrapWidth(330).setAlign("center"));
     this.concern = this.fixed(label(this, 195, 240, "", 17).setOrigin(0.5).setWordWrapWidth(345).setAlign("center"));
     this.feedback = this.fixed(label(this, 195, 510, "", 13, "#dfb778").setOrigin(0.5).setWordWrapWidth(340).setAlign("center"));
     this.focusBar = this.fixed(this.add.rectangle(45, 565, 300, 5, C.mint).setOrigin(0, 0.5));
     this.focusBar.setVisible(false);
     this.fixed(this.add.rectangle(195, 738, 390, 212, C.ink, 0.97));
-    this.flap = button(this, 195, 715, 330, "HOLD TO FLAP · SPACE", () => Sfx.unlock(), true);
+    this.flap = this.control(195, 715, 330, "HOLD TO RISE · SPACE / ↑", () => Sfx.unlock(), true);
     this.flap.bg.on("pointerdown", p => { if (!this.paused) this.held.add(p.id); });
     this.flap.bg.on("pointerout", p => this.held.delete(p.id));
-    this.glamour = button(this, 195, 615, 330, "HOLD GLAMOUR · E", () => Sfx.unlock(), true);
+    this.flightHelp = this.fixed(label(this, 195, 778, "Hold SPACE / ↑ to rise.\nRelease to descend.", 14, "#acbdc9").setOrigin(0.5).setAlign("center").setLineSpacing(8), 61);
+    this.glamour = this.control(195, 615, 330, "HOLD GLAMOUR · E", () => Sfx.unlock(), true);
     this.glamour.bg.on("pointerdown", p => { if (!this.paused) this.held.add(p.id); });
     this.glamour.bg.on("pointerout", p => this.held.delete(p.id));
     this.glamour.bg.setVisible(false).disableInteractive(); this.glamour.caption.setVisible(false);
-    this.choices = f.resident.choices.map((choice, index) => button(this, 195, 680 + index * 59, 350, `${index + 1}. ${choice[1]}`, () => this.choose(index)));
-    this.choices.forEach(b => { b.bg.setVisible(false).disableInteractive(); b.caption.setVisible(false).setWordWrapWidth(325); });
+    this.choices = f.resident.choices.map((choice, index) => this.control(195, 680 + index * 59, 350, `${index + 1}. ${choice[1]}`, () => this.choose(index)));
+    this.choices.forEach(b => { b.bg.setVisible(false).disableInteractive(); b.caption.setVisible(false).setWordWrapWidth(325).setAlign("center"); });
     const pause = button(this, 344, 57, 52, "Ⅱ", () => this.paused ? this.resumeGame() : this.pauseGame());
     [pause.bg, pause.caption].forEach(o => this.fixed(o, 95));
     this.keys = this.input.keyboard.addKeys("SPACE,UP,W,Z,E,J");
@@ -948,7 +954,7 @@ class BatScene extends Phaser.Scene {
       this.input.removeAllListeners(); this.held.clear(); this.input.keyboard.resetKeys(); Sfx.stop();
     });
     this.renderFlight();
-    announce(`Night ${f.night}. You are a bat. Hold Space or Flap to rise, release to descend. Reach the window and earn an invitation.`);
+    announce(`Night ${f.night}. You fly right automatically. Hold Space, Up or the rise button to fly higher; release to descend. At the window, hold E or Glamour while the resident is calm, then tap a promise or press 1, 2 or 3.`);
   }
   choose(index) { if (!this.paused && !this.transitioning) VampBat.choose(this.flight, index); }
   pauseGame() {
@@ -997,15 +1003,19 @@ class BatScene extends Phaser.Scene {
       if (!this.windowShown) {
         this.windowShown = true; this.held.clear();
         this.flap.bg.setVisible(false).disableInteractive(); this.flap.caption.setVisible(false);
+        this.flightHelp.setVisible(false);
         this.glamour.bg.setVisible(true).setInteractive(); this.glamour.caption.setVisible(true);
-        this.choices.forEach(b => { b.bg.setVisible(true).setInteractive(); b.caption.setVisible(true); });
+        this.choices.forEach(b => { b.bg.setVisible(true); b.caption.setVisible(true); });
         this.focusBar.setVisible(true);
       }
       this.phaseText.setText(f.resident.name);
       this.concern.setText(`“${f.resident.concern}”`);
-      this.note.setText(f.invitationLeft > 0 ? `CHOOSE YOUR PROMISE · ${f.invitationLeft.toFixed(1)}s` : VampBat.calm(f) ? "CALM · HOLD GLAMOUR" : "SUSPICIOUS · WAIT FOR THEIR GAZE TO SOFTEN");
+      this.note.setText(f.invitationLeft > 0 ? `Tap a promise or press 1, 2, 3 · ${f.invitationLeft.toFixed(1)}s` : VampBat.calm(f) ? "CALM · HOLD GLAMOUR" : "SUSPICIOUS · WAIT FOR THEIR GAZE TO SOFTEN");
       this.focusBar.setScale(f.invitationLeft > 0 ? f.invitationLeft / 4 : f.focus / 1.1, 1);
-      this.choices.forEach(b => b.bg.setAlpha(f.invitationLeft > 0 ? 1 : 0.4));
+      this.choices.forEach(b => {
+        b.bg.setAlpha(f.invitationLeft > 0 ? 1 : 0.6);
+        if (f.invitationLeft > 0) b.bg.setInteractive(); else b.bg.disableInteractive();
+      });
     }
   }
   update(_time, delta) {
