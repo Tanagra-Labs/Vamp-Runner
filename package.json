@@ -1,6 +1,6 @@
 {
   "name": "vamp-runner",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/*.test.js",

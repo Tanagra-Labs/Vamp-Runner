@@ -54,3 +54,58 @@ test('bat scenes pause the clock, release held touch input and remove listeners 
   scene.resumeGame(); scene.update(10020,16); assert.ok(scene.flight.timeLeft<time);
   scene.events.emit('shutdown'); assert.equal(h.windowEvents.listenerCount('blur'),0); assert.equal(h.documentEvents.listenerCount('visibilitychange'),0);
 });
+
+test('bat flight controls remain visible above the panel and explain automatic forward flight', () => {
+  const h=loadGame(),scene=h.wire(new h.BatScene()); scene.init({nightNumber:2}); scene.create();
+  for(const object of [scene.flap.bg,scene.flap.caption]) {
+    assert.equal(object.visible,true);
+    assert.equal(h.coveringPanels(scene,object).length,0,'the Flap control must not be painted over');
+  }
+  assert.match(scene.note.text,/automatically/i);
+  assert.match(scene.flightHelp.text,/hold.*space.*rise/i);
+  assert.match(scene.flightHelp.text,/release.*descend/i);
+  assert.equal(h.tap(scene,195,715,2),scene.flap.bg);
+  for(let i=0;i<12;i++)scene.update(0,1000*R.STEP);
+  assert.ok(scene.flight.bat.x>65,'forward flight is automatic');
+  assert.ok(scene.flight.bat.vy<0,'holding Flap rises');
+  scene.input.emit('pointerup',{id:2});
+  for(let i=0;i<40;i++)scene.update(0,1000*R.STEP);
+  assert.ok(scene.flight.bat.vy>0,'releasing Flap descends');
+  scene.events.emit('shutdown');
+});
+
+test('all resident choices are readable and touch or keyboard can earn an invitation after glamour', () => {
+  for(const inputMode of ['touch','keyboard']) for(let seed=0;seed<5;seed++) {
+    const h=loadGame(),scene=h.wire(new h.BatScene()); scene.init({nightNumber:2,seed}); scene.create();
+    const f=scene.flight; f.status='window'; f.bat.x=f.window.x-32; f.bat.y=f.window.y;
+    scene.renderFlight();
+    assert.ok(scene.cameras.main.scrollX>1000);
+    assert.equal(scene.flap.bg.visible,false); assert.equal(scene.flap.bg.interactive,false);
+    assert.equal(scene.flightHelp.visible,false);
+    for(const choice of scene.choices) {
+      assert.equal(choice.bg.visible,true); assert.equal(choice.caption.visible,true);
+      assert.equal(choice.bg.interactive,false,'read the promises before glamour; no early selection');
+      for(const object of [choice.bg,choice.caption]) {
+        assert.equal(object.scrollFactorX,0);
+        assert.equal(h.coveringPanels(scene,object).length,0,'a promise must not be painted over');
+      }
+    }
+    const correct=f.resident.choices.findIndex(c=>c[0]===f.resident.promise);
+    assert.equal(h.tap(scene,195,scene.choices[correct].bg.y),null);
+    assert.equal(h.coveringPanels(scene,scene.glamour.caption).length,0);
+    if(inputMode==='touch')assert.equal(h.tap(scene,195,615,2),scene.glamour.bg);
+    else scene.keys.E.isDown=true;
+    for(let i=0;i<Math.ceil(1.2/R.STEP);i++)scene.update(0,1000*R.STEP);
+    assert.ok(f.invitationLeft>0); assert.match(scene.note.text,/1.*2.*3/);
+    assert.ok(scene.choices.every(choice=>choice.bg.interactive));
+    scene.input.emit('pointerup',{id:2}); scene.keys.E.isDown=false;
+    if(inputMode==='touch')assert.equal(h.tap(scene,195,scene.choices[correct].bg.y,3),scene.choices[correct].bg);
+    else scene.input.keyboard.emit('keydown',{code:`Digit${correct+1}`});
+    assert.equal(f.status,'invited'); scene.update(0,16);
+    assert.equal(f.profile.dirt,5); assert.equal(f.score,200);
+    scene.time.callbacks[0]();
+    assert.equal(scene.transitions[0].name,'Game');
+    assert.equal(scene.transitions[0].data.timeLeft,f.timeLeft);
+    scene.events.emit('shutdown');
+  }
+});

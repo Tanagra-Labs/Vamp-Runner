@@ -21,7 +21,7 @@ Open `http://localhost:3000`. Phaser **3.60.0** loads from jsDelivr, requiring i
 | Jump | Space, Up, W, or Z | Jump button |
 | Glamour nearby human | Hold E (or J), facing them while stationary | Hold Glamour |
 | Bite glamoured human | F (or K), within close range | Bite button |
-| Fly upward as a bat | Hold Space, Up, W or Z; release to descend | Hold Flap; release to descend |
+| Fly upward as a bat | Hold Space, Up, W or Z; release to descend | Hold the rise button; release to descend |
 | Glamour a window resident | Hold E (or J) while they are calm | Hold Glamour |
 | Choose an invitation response | 1, 2 or 3 | Named response |
 | Pause / resume | Escape or P | Pause / Resume |
@@ -51,7 +51,9 @@ The sunrise clock shows minutes and seconds, a moving sun marker and a gradually
 
 Nights **9 and 10** descend into the catacombs and undercity sewers, with sixteen new encounters, burial hoists, crumbling bone bridges, pipe crossings, drain ferries, caches and warned garlic vents. Cross-bearing priests appear from night 3 and guard later areas. Their larger crosses visibly lower, rise and burn; glamour only works while the cross is lowered.
 
-The bat stage currently connects **Next Night → flight → window invitation → ground map**. Hold Flap to rise and release to descend through rooftop gaps. A collision costs a coffin and retries near the obstacle. At the window, read the resident's concern, hold glamour through 1.1 seconds of calm, then choose a fitting promise within four seconds. Five residents have different concerns and shuffled responses. A wrong promise costs two seconds; three refusals cost a coffin. An invitation awards **5 dirt and 200 points**, once. Remaining time, coffins, currency and score carry into the ground map; the clock does not restart at the window.
+The bat stage currently connects **Next Night → flight → window invitation → ground map**. The bat flies right automatically. Hold Space, Up or the rise button to fly higher and release to descend through rooftop gaps. A collision costs a coffin and retries near the obstacle. At the window, read the resident's concern and all three promises, hold glamour through 1.1 seconds of calm, then tap a fitting promise or press 1–3 within four seconds. Five residents have different concerns and shuffled responses. A wrong promise costs two seconds; three refusals cost a coffin. An invitation awards **5 dirt and 200 points**, once. Remaining time, coffins, currency and score carry into the ground map; the clock does not restart at the window.
+
+**1.5.1 visibility fix:** the bottom panel covered the bat's flight button and invitation responses. Their backgrounds and captions now render above the panel with fixed screen positions. Promises remain readable before glamour and become selectable once the resident is listening. Regression checks cover panel occlusion, holding and releasing the flight control, and completing every resident's invitation through touch and keyboard input.
 
 **Progression placement is provisional:** bat stages currently run before nights 2 onward for testing. Their eventual placement at defined vampire-development milestones remains a design decision; the mechanics are ready for that later integration.
 
@@ -99,7 +101,7 @@ npm run check
 npm test
 ```
 
-63 tests cover all twelve ground chapters at three seeds with starting abilities; surface cache climbs in both directions and underground caches; a full campaign including bat flights and shared deadlines; five consecutive crypt/flight/invitation/map transitions; five resident concerns, wrong promises and invitation rewards; glamour interruption and anti-farming; conversion healing and veil rules; priest resistance and cross timing; underground vents; sunrise warnings and slow-frame deadlines; distinct sound voices, mute and cleanup; moving platforms; one-way gates; save/resume; input, upgrades, scores and the HTTP server.
+65 tests cover all twelve ground chapters at three seeds with starting abilities; surface cache climbs in both directions and underground caches; a full campaign including bat flights and shared deadlines; five consecutive crypt/flight/invitation/map transitions; five resident concerns, wrong promises and invitation rewards; visible bat controls and touch/keyboard invitation selection; glamour interruption and anti-farming; conversion healing and veil rules; priest resistance and cross timing; underground vents; sunrise warnings and slow-frame deadlines; distinct sound voices, mute and cleanup; moving platforms; one-way gates; save/resume; input, upgrades, scores and the HTTP server.
 
 Route tests supply movement and action inputs to the real simulation, without teleporting or granting immunity. Scene tests use a Node adapter and Phaser's scroll-coordinate formula; audio tests use a Web Audio adapter. These checks do not run the actual browser renderer, device input or speakers. Before release, play at phone and desktop sizes: hold glamour and approach to bite, face a priest, fly and earn an invitation, enter an underground district, and check Next Night, save/resume, two-finger controls, sound and reduced motion. The development browser blocks local previews, so visual/device behavior, listening quality and human difficulty tuning still need that playtest.
 
