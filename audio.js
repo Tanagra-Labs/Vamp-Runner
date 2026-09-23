@@ -32,6 +32,15 @@
       case "stun": return [note(3 + offset, 0, 0.3, 0.024, "sine", 12), note(10 + offset, 0.09, 0.25, 0.016)];
       case "focus": return [note(-5, 0, 0.35, 0.017, "sine", 5)];
       case "focus-lost": return [note(0, 0, 0.16, 0.02, "triangle", -5)];
+      case "swarm": return [-3, 12, 5, 19].map((p, i) => note(p, i * 0.035, 0.16, 0.018, "triangle", -19));
+      case "bell": return [note(-12, 0, 1.2, 0.043, "sine"), note(7, 0, 1.05, 0.02, "sine"), note(16, 0.01, 0.8, 0.012, "sine")];
+      case "alarm": return [0, 1, 0, -12].map((p, i) => note(p, i * 0.2, 0.55, 0.029, "triangle"));
+      case "consecrate": return [note(19, 0, 1.15, 0.021, "sine", 5), note(7, 0, 1.15, 0.012, "sine")];
+      case "seal-stolen": return [-12, 0, 7, 13, 24].map((p, i) => note(p, i * 0.11, 0.8, 0.03, "sine"));
+      case "coven-born": return [3, 7, 10].map((p, i) => note(p, i * 0.13, 0.5, 0.022, "sine"));
+      case "sabotage": return [12, 7, 3, 0].map((p, i) => note(p, i * 0.12, 0.35, 0.022));
+      case "pursuit": return [note(-12, 0, 0.1, 0.028), note(-5, 0.17, 0.12, 0.02), note(-12, 0.35, 0.12, 0.026)];
+      case "witness": return [note(12, 0, 0.2, 0.024, "triangle", -1)];
       case "bite": return [note(-12, 0, 0.12, 0.04, "triangle", -7), note(7, 0.14, 0.22, 0.025)];
       case "veil": return [0, 3, 7, 12].map((p, i) => note(p, i * 0.09, 0.4, 0.025, "sine"));
       case "veil-blocked": return [note(24, 0, 0.24, 0.04, "sine", -12), note(7, 0.1, 0.3, 0.02)];
@@ -45,7 +54,7 @@
     }
   }
   function createSound({ enabled = () => false, contextFactory = () => new (root.AudioContext || root.webkitAudioContext)() } = {}) {
-    let ctx, themeKey = "quarter", nextAmbient = 0, lastPulse = -1;
+    let ctx, themeKey = "quarter", nextAmbient = 0, lastPulse = -1, nextPursuit = 0;
     const voices = new Set(), variants = new Map(), recent = new Map();
     function unlock() {
       if (!enabled()) return false;
@@ -91,9 +100,10 @@
     }
     return {
       play, unlock, stop,
-      setTheme(key) { stop(); themeKey = THEMES[key] ? key : "quarter"; nextAmbient = 0; lastPulse = -1; variants.clear(); },
-      tick(elapsed, timeLeft) {
+      setTheme(key) { stop(); themeKey = THEMES[key] ? key : "quarter"; nextAmbient = 0; lastPulse = -1; nextPursuit = 0; variants.clear(); },
+      tick(elapsed, timeLeft, pursuing = false) {
         if (!enabled()) return;
+        if (pursuing && elapsed >= nextPursuit) { play("pursuit"); nextPursuit = elapsed + 0.9; }
         if (timeLeft <= 10) {
           const second = Math.ceil(timeLeft);
           if (second !== lastPulse && second > 0) { lastPulse = second; play("heartbeat"); }

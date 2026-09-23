@@ -130,6 +130,7 @@ function loadGame() {
     VampRules: rules,
     VampAudio: require("../audio"),
     VampBat: require("../bat"),
+    VampHunt: require("../hunt"),
     localStorage: {
       getItem: (key) => storage.get(key) ?? null,
       setItem: (key, value) => storage.set(key, value),
