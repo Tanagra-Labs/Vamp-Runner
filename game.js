@@ -340,14 +340,14 @@ class MenuScene extends Phaser.Scene {
       this,
       24,
       435,
-      "The Bellkeeper guards a stolen seal.\nTurn his people. Break his watch. Get out.",
+      "Steal the Bellkeeper's seal and reach your crypt.\nRecruit allies to help you escape.",
       14,
       "#afbec9",
     ).setLineSpacing(6);
     const rows = [
-      ["01", "KEEP TO THE SHADOWS", "Move ← →. Space to jump above the watch."],
-      ["02", "MAKE THEM YOURS", "Hold E to glamour. Close in; F to bite."],
-      ["03", "BECOME THE SWARM", "V bursts forward. Biting restores blood."],
+      ["01", "MOVE & HIDE", "← → to move. Space to jump. Stop in shadows."],
+      ["02", "RECRUIT ALLIES", "Hold Glamour (E), then get close and Bite (F)."],
+      ["03", "CROSS LONGER GAPS", "Jump, then use Swarm (V). Costs one blood."],
     ];
     rows.forEach(([num, title, copy], i) => {
       const y = 490 + i * 47;
@@ -456,7 +456,7 @@ class GameScene extends Phaser.Scene {
     this.renderWorld();
     this.message.setText(`${this.world.level.name}\n${Math.ceil(this.world.timeLeft)}s until sunrise · ${this.world.level.requiredKeys} crypt keys${this.world.level.theme.underground ? "\nOnly your sealed crypt stops the dawn curse." : this.world.level.oneWay ? "\nOne way: gates seal behind you." : ""}`);
     if (this.world.hunt) { this.message.setText("THE BELLKEEPER\nSteal his seal. Bring it home before dawn."); this.messageUntil = 4; }
-    announce(`Night ${this.world.night}: ${this.world.level.name}. Find ${this.world.level.requiredKeys} crypt keys before sunrise.${this.world.level.oneWay ? " Gates seal behind you when you enter the next section." : ""}`);
+    announce(this.world.hunt ? "The Bellkeeper. Take the seal from the altar and reach your crypt before sunrise." : `Night ${this.world.night}: ${this.world.level.name}. Find ${this.world.level.requiredKeys} crypt keys before sunrise.${this.world.level.oneWay ? " Gates seal behind you when you enter the next section." : ""}`);
   }
   fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
   drawCity() {
@@ -564,7 +564,7 @@ class GameScene extends Phaser.Scene {
     }
     label(this, 2620, 320, "HIGH ROOFS · JUMP + SWARM →", 11, "#c6b3e8", true).setOrigin(0.5).setDepth(4);
     label(this, 2640, 593, "LOW ROOFS →", 11, "#dfb778", true).setOrigin(0.5).setDepth(4);
-    this.sealLabel = label(this, 2380, 415, "HOLD GLAMOUR\nTO BREAK THE SEAL", 11, "#dfb778", true).setOrigin(0.5).setAlign("center").setDepth(15);
+    this.sealLabel = label(this, 2380, 415, "STAND BESIDE THE SEAL\nHOLD TAKE SEAL (E)", 11, "#dfb778", true).setOrigin(0.5).setAlign("center").setDepth(15);
     this.huntGraphic = this.add.graphics().setDepth(14);
     this.huntAir = this.fixed(this.add.graphics(), 42);
     this.huntHeat = this.fixed(this.add.graphics(), 52);
@@ -575,10 +575,10 @@ class GameScene extends Phaser.Scene {
     const w = this.world, h = w.hunt, p = w.player, g = this.huntGraphic, air = this.huntAir;
     const clock = preferences.reducedMotion ? 0 : w.elapsed;
     g.clear(); air.clear(); this.huntHeat.clear();
-    this.routeText.setText(h.phase === "escape" ? "THE WARD IS RISING · KEEP MOVING" : h.hidden ? "HIDDEN · THE WATCH LOSES YOUR TRAIL" : h.alarm ? "HUNTED · THE BELLS HAVE WOKEN THE WATCH" : h.heat > 25 ? "SUSPICIOUS · FIND SHADOW OR HIGH GROUND" : "UNSEEN · CHOOSE YOUR APPROACH");
+    this.routeText.setText(h.phase === "escape" ? "HOLY FIRE BEHIND YOU · KEEP MOVING" : h.hidden ? h.alarm ? "HIDDEN · GUARDS ARE STILL ALERT" : "HIDDEN · OUT OF SIGHT" : h.alarm ? "ALARM RAISED · HUNTERS ATTACK FASTER" : h.heat > 25 ? "GUARDS ARE SUSPICIOUS · FIND COVER" : "NO ALARM");
     this.keyText.setText(VampHunt.objective(w));
     this.questText.setText(`BLOOD ${"◆".repeat(h.blood)}${"◇".repeat(3 - h.blood)} · ${h.allies} ALLIES`);
-    this.covenText.setText(h.phase === "escape" ? `${Math.max(0, Math.ceil((p.x - h.pursuitX) / 10))}m AHEAD OF THE WARD${h.bellCut ? " · BELL SILENCED" : ""}` : h.hidden ? "Stay still. Let them look past you." : "Every human can change your escape.");
+    this.covenText.setText(h.phase === "escape" ? `${Math.max(0, Math.ceil((p.x - h.pursuitX) / 10))}m AHEAD OF THE FIRE${h.bellCut ? " · BELL SILENCED" : ""}` : h.hidden ? "You're hidden while you stay still." : "Bite a glamoured human to recruit them.");
     this.huntHeat.fillStyle(C.line, 0.65); this.huntHeat.fillRect(20, 207, 282, 3);
     this.huntHeat.fillStyle(h.alarm ? C.red : C.gold); this.huntHeat.fillRect(20, 207, 282 * h.heat / 100, 3);
     this.swarmButton.bg.setAlpha(h.blood > 0 && h.cooldown <= 0 ? 1 : 0.4);
@@ -656,10 +656,11 @@ class GameScene extends Phaser.Scene {
       g.lineStyle(2, b.color, (1 - age) * 0.8); g.strokeCircle(b.x, b.y, preferences.reducedMotion ? 24 : 10 + age * 62);
     }
     const nearby = targetHuman(w);
-    if (nearby?.state === "human" && !w.focus && nearby.behavior !== "priest") this.hint.setText(`${nearby.name}\nFace them. Hold GLAMOUR. Then close in.`);
-    if (!nearby && !w.focus) this.hint.setText(h.phase === "escape" ? "Jump across. Swarm carries you farther." : h.hidden ? "Hidden. Watch the lamps and choose your moment." : h.blood ? "Jump · then SWARM for a longer crossing" : "A bite or blood syringe restores your swarm.");
+    if (!nearby && !w.focus) this.hint.setText(h.hidden ? "Hidden. Move when you're ready." : h.phase === "escape" ? h.blood ? "Keep heading right toward the crypt." : "Take the lower roofs. You don't need Swarm there." : h.blood ? "Swarm (V) sends you forward. Jump first to cross gaps." : "Bite or collect a syringe to restore blood.");
+    this.stunButton.caption.setText("GLAMOUR");
     if (VampHunt.atSeal(w)) {
-      this.hint.setText("Hold GLAMOUR to unbind the seal.");
+      this.stunButton.caption.setText("TAKE SEAL");
+      this.hint.setText(Math.abs(p.vx) >= 24 ? "Stop beside the seal, then hold Take Seal (E)." : "Hold Take Seal (E) until the bar fills.");
       this.stunButton.bg.setAlpha(1);
     }
     if (h.phase === "approach") {
@@ -829,7 +830,7 @@ class GameScene extends Phaser.Scene {
     dim.on("pointerdown", (_p, _x, _y, e) => e?.stopPropagation());
     add(label(this, 195, 228, "THE NIGHT CAN WAIT.", 27).setOrigin(0.5));
     if (this.world.level.oneWay) add(label(this, 195, 416, "ONE WAY · GATES SEAL BEHIND YOU", 11, "#dfb778", true).setOrigin(0.5));
-    add(label(this, 195, 285, `Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nHold E: glamour · F: bite\n${this.world.hunt ? "V / Shift: swarm (costs 1 blood)" : "Stay still. Face the human."}`, 15, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(14));
+    add(label(this, 195, 285, `Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nHold E: glamour · F: bite\n${this.world.hunt ? "V / Shift: swarm (1 blood)\nAt the altar: hold Take Seal (E)" : "Stop and face them to glamour."}`, 15, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(10));
     const contracts = contractResults(this.world).map((c) => `${c.complete ? "✓" : "○"} ${c.title}: ${c.key === "untouched" ? c.value === 0 ? "on track" : "missed" : c.value + "/" + c.target} (+${c.reward} dirt)`);
     add(label(this, 195, 440, "OPTIONAL NIGHT CHALLENGES", 11, "#dfb778", true).setOrigin(0.5));
     add(label(this, 195, 477, contracts.join("\n"), 13, "#dfb778").setOrigin(0.5).setAlign("center").setLineSpacing(8));
@@ -963,8 +964,22 @@ class GameScene extends Phaser.Scene {
     const nearby = targetHuman(w), biteTarget = targetHuman(w, 30, true);
     const section = sectionAt(w.level, p.x);
     const nextGate = w.level.gates.find((gate) => gate.x > p.x && gate.x - p.x < 210);
-    const gateHint = nextGate ? gateState(w, nextGate) === "locked" ? "KEY FIRST · THE GATE IS LOCKED" : "NO RETURN · CROSS TO SEAL THIS SECTION" : null;
-    this.hint.setText(w.focus ? "HOLD GLAMOUR · DON'T MOVE" : biteTarget ? `BITE NOW · ${biteTarget.stunned.toFixed(1)}s` : nearby?.state === "stunned" ? "GET CLOSER · BITE BEFORE THEY WAKE" : nearby?.behavior === "priest" && pulseState(w.elapsed, 3.8, nearby.phase) !== "safe" ? "CROSS RAISED · GLAMOUR BLOCKED" : nearby ? "FACE THEM · HOLD GLAMOUR · +2 DIRT" : gateHint || section.hint);
+    const gateHint = nextGate ? gateState(w, nextGate) === "locked" ? "Find this section's key to open the gate." : "NO RETURN · The gate will close behind you." : null;
+    const target = biteTarget || nearby;
+    let actionHint = gateHint || section.hint;
+    if (w.focus) actionHint = "Keep holding Glamour (E) until the bar fills.";
+    else if (target) {
+      if (!p.grounded) actionHint = "Land beside them before using Glamour or Bite.";
+      else if (Math.abs(p.y - target.y) >= 18) actionHint = "Get onto the same level as them first.";
+      else if ((target.x - p.x) * p.facing < 0) actionHint = "Turn toward them first.";
+      else if (target.state === "stunned") actionHint = biteTarget ? `Press Bite (F) before they recover: ${target.stunned.toFixed(1)}s` : "Move closer, then press Bite (F).";
+      else if (target.behavior === "priest" && pulseState(w.elapsed, 3.8, target.phase) !== "safe") actionHint = "Wait for the priest to lower his cross.";
+      else if (Math.abs(p.vx) >= 24) actionHint = "Stop moving before holding Glamour (E).";
+      else if (w.stunCooldown > 0) actionHint = "Glamour is recharging. Wait a moment.";
+      else if (!canGlamour(w, target)) actionHint = "Move closer to use Glamour (E).";
+      else actionHint = "Hold Glamour (E) until the bar fills.";
+    }
+    this.hint.setText(actionHint);
     this.stunButton.bg.setAlpha(canGlamour(w, nearby) && w.stunCooldown === 0 ? 1 : 0.5);
     this.biteButton.bg.setAlpha(biteTarget ? 1 : 0.5);
     this.moveButtons.forEach(({ bg, direction }) => bg.setFillStyle([...this.held.values()].includes(direction) ? 0x384756 : C.panel));
@@ -1060,10 +1075,10 @@ class HuntEndScene extends Phaser.Scene {
     label(this, 195, 126, won ? VampHunt.result(w) : "Not this night.", won ? 24 : 33).setOrigin(0.5).setWordWrapWidth(345).setAlign("center");
     label(this, 195, 398, won ? "You changed the night." : "There is another way through.", 25).setOrigin(0.5);
     const story = won ? [
-      h.lampsOut ? "The lamplighter took away their sight." : "The lamps stayed lit.",
-      h.bridgeOpen ? "The watchman made you a road of shadows." : "You made your own way across the roofs.",
-      h.bellCut ? "Your coven silenced the bell." : "The bell chased you all the way home.",
-    ].join("\n\n") : `${reason || w.reason}\n\n${h.phase === "escape" ? "Take the lower roofs if your blood runs dry.\nTurn the bellringer to slow the ward." : "The high roofs avoid the watch.\nTurn the lamplighter to put out the lights."}`;
+      h.lampsOut ? "The lamplighter put out the streetlights." : "The streetlights stayed on.",
+      h.bridgeOpen ? "The watchman opened the rooftop bridge." : "You escaped without the watchman's bridge.",
+      h.bellCut ? "Your coven silenced the bell." : "You escaped with the bell still ringing.",
+    ].join("\n\n") : `${reason || w.reason}\n\n${h.phase === "escape" ? "The lower roofs don't require Swarm.\nNext time, recruit the bellringer to slow the fire." : "Try the rooftops to avoid the guards,\nor recruit the lamplighter to turn off the lights."}`;
     label(this, 195, 448, story, 16, "#b8c5cf").setOrigin(0.5, 0).setWordWrapWidth(330).setAlign("center").setLineSpacing(5);
     label(this, 195, 620, `${w.score.toLocaleString()} POINTS · ${h.allies} ALLIES`, 12, "#dfb778", true).setOrigin(0.5);
     this.leaving = false;
@@ -1182,7 +1197,7 @@ class BatScene extends Phaser.Scene {
     bat.fillStyle(0xf486a0); bat.fillCircle(b.x + 3, b.y - 4, 2);
     const seconds = Math.ceil(f.timeLeft);
     this.clock.setText(`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} TO SUNRISE`);
-    this.statusText.setText(`${f.lives} COFFINS · ${f.profile.dirt} DIRT · SAME NIGHT CLOCK`);
+    this.statusText.setText(`${f.lives} COFFINS · ${f.profile.dirt} DIRT`);
     this.dawn.setAlpha(Math.max(0, 1 - f.timeLeft / f.level.duration - 0.35) * 0.8);
     if (f.status === "window") {
       if (!this.windowShown) {
@@ -1195,7 +1210,7 @@ class BatScene extends Phaser.Scene {
       }
       this.phaseText.setText(f.resident.name);
       this.concern.setText(`“${f.resident.concern}”`);
-      this.note.setText(f.invitationLeft > 0 ? `Tap a promise or press 1, 2, 3 · ${f.invitationLeft.toFixed(1)}s` : VampBat.calm(f) ? "CALM · HOLD GLAMOUR" : "SUSPICIOUS · WAIT FOR THEIR GAZE TO SOFTEN");
+      this.note.setText(f.invitationLeft > 0 ? `Reply: tap an option or press 1, 2, 3 · ${f.invitationLeft.toFixed(1)}s` : VampBat.calm(f) ? "They're calm. Hold Glamour (E)." : "They're nervous. Release Glamour and wait.");
       this.focusBar.setScale(f.invitationLeft > 0 ? f.invitationLeft / 4 : f.focus / 1.1, 1);
       this.choices.forEach(b => {
         b.bg.setAlpha(f.invitationLeft > 0 ? 1 : 0.6);

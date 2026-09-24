@@ -94,7 +94,7 @@
     { name: "The Longest Night", theme: "cathedral", seconds: 190, keys: 3, sections: ["chimneys","doubleferry","gravestones","bunting","cargo","reliquary","scaffolds","brokenroots","pillars","nave"] },
   ];
   const HINTS = {
-    brick: "Read the roofline. Every landing is different.", beam: "Mind the gaps between the beams.",
+    brick: "Jump between the rooftops. Watch for gaps.", beam: "Mind the gaps between the beams.",
     branch: "Follow the branches. Watch the low landings.", stone: "Short ledges. Line up your next jump.",
     awning: "Take the canopies. Hunt for high caches.", pier: "Ride the platforms. Wait for your landing.",
     bone: "Follow the tomb ledges. The crypt is your only refuge.", pipe: "Stay above the drains. Time the next crossing.",
@@ -140,7 +140,7 @@
       if (e.water) section.hint = "Water below. Wait for the next landing.";
       if (e.decks.some(d => d[3]?.crumble)) section.hint = "Cracked ledges collapse. Keep moving.";
       if (e.decks.some(d => d[3]?.motion?.axis === "y")) section.hint = "Ride the lift. Jump when the heights line up.";
-      if (e.detour) section.hint = "High caches reward an extra climb.";
+      if (e.detour) section.hint = "There's extra grave dirt on the upper ledges.";
       if (e.vents) section.hint = "Garlic vents pulse. Cross when the fumes clear.";
       sections.push(section); checkpoints.push(start + 80);
       const decks = e.decks.map(([x,y,w,extra = {}]) => platform(xPoint(mirrored ? x + w : x), y, w, { skin: e.skin, section: index, ...extra, ...(extra.motion ? { motion: { ...extra.motion, phase: extra.motion.axis === "x" && mirrored ? Math.PI / 2 : extra.motion.phase } } : {}) }));

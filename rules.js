@@ -90,7 +90,7 @@
       world.stats.blood++; world.score += 100; text = "Blood +100 · garlic healed";
     } else if (pickup.kind === "key") {
       world.keys++; world.score += 200;
-      text = world.keys === world.level.requiredKeys ? "All keys found. The crypt is open!" : `Crypt key ${world.keys}/${world.level.requiredKeys}`;
+      text = world.hunt ? "Seal taken. Get to the crypt." : world.keys === world.level.requiredKeys ? "All keys found. The crypt is open!" : `Crypt key ${world.keys}/${world.level.requiredKeys}`;
     } else {
       world.iv = 6 + 2 * world.profile.upgrades.iv; world.score += 150;
       text = "IV rush · protected + faster";
@@ -110,14 +110,14 @@
   function interruptGlamour(world) {
     if (!world.focus) return;
     world.focus = null; world.stunCooldown = Math.max(world.stunCooldown, 0.35);
-    world.events.push({ kind: "focus-lost", text: "Focus broken. Face them, hold still and try again." });
+    world.events.push({ kind: "focus-lost", text: "Glamour interrupted." });
   }
   function stun(world) {
     if (world.status !== "playing" || world.stunCooldown > 0 || world.focus) return false;
     const h = targetHuman(world);
     if (!canGlamour(world, h)) return false;
     world.focus = { id: h.id, elapsed: 0, duration: h.behavior === "priest" ? 1.25 : h.behavior === "hunter" ? 1 : 0.75 };
-    world.events.push({ kind: "focus", text: "Hold glamour. Stay still and keep them in sight." });
+    world.events.push({ kind: "focus", text: "Keep holding Glamour until the bar fills." });
     return true;
   }
   function updateGlamour(world, input, dt) {
@@ -136,7 +136,7 @@
       h.glamourRewarded = true; world.stats.glamoured++;
       world.profile.dirt += reward; world.stats.glamourDirt += reward;
     }
-    world.events.push({ kind: "stun", text: `Glamoured${reward ? ` · +${reward} dirt` : ""}. Get close and bite.`, x: h.x, y: h.y });
+    world.events.push({ kind: "stun", text: `They're glamoured. Get close and press Bite (F).${reward ? `\n+${reward} grave dirt` : ""}`, x: h.x, y: h.y });
   }
   function bite(world) {
     if (world.status !== "playing") return false;
@@ -149,7 +149,8 @@
     world.garlicHits = Math.max(0, world.garlicHits - 1);
     world.feeds++;
     world.score += points;
-    world.events.push({ kind: "bite", text: `+${points} pts · +${reward} dirt${healed ? " · garlic healed" : ""}\nFeed ${world.feeds}/${FEEDS_PER_VEIL} toward a shadow veil`, x: h.x, y: h.y });
+    const bitesLeft = FEEDS_PER_VEIL - world.feeds;
+    world.events.push({ kind: "bite", text: `+${points} pts · +${reward} dirt${healed ? " · 1 garlic wound healed" : ""}\n${bitesLeft ? `${bitesLeft} more ${bitesLeft === 1 ? "bite" : "bites"} for a protective veil` : "Protective veil earned."}`, x: h.x, y: h.y });
     if (world.feeds === FEEDS_PER_VEIL) {
       world.feeds = 0; world.veil = true;
       world.events.push({ kind: "veil", text: "SHADOW VEIL · next garlic or cross hit blocked" });
@@ -374,7 +375,7 @@
     if (p.x >= world.level.crypt.x - 20 && p.y + p.h >= FLOOR - 50 && p.grounded) {
       if (!finishNight(world) && world.elapsed - world.gateMessageAt > 3) {
         world.gateMessageAt = world.elapsed;
-        world.events.push({ kind: "locked", text: `Crypt locked. Find ${world.level.requiredKeys - world.keys} more key${world.level.requiredKeys - world.keys === 1 ? "" : "s"}. Follow the blue arrow.` });
+        world.events.push({ kind: "locked", text: world.hunt ? "You need the seal to enter.\nFollow the arrow back to the altar." : `Crypt locked. Find ${world.level.requiredKeys - world.keys} more key${world.level.requiredKeys - world.keys === 1 ? "" : "s"}. Follow the blue arrow.` });
       }
     }
   }

@@ -19,7 +19,7 @@ Conversions change the map. The new vampire flies to their task before the effec
 | Bellringer or sexton | Silences the bell, delaying and slowing the pursuing ward |
 | Bellkeeper | Stops his targeted cross strikes and silences the bell |
 
-The Bellkeeper marks a column of ground before striking it with his cross. The mark stays where it was placed, giving time to dodge. At the altar, hold **Glamour** beside the seal for 1.5 uninterrupted seconds to unbind it. Movement, jumping, releasing glamour or a hit breaks concentration. Taking the seal refills blood and starts the escape: the sky warms, bells and a faster pulse sound, and a wall of holy fire follows across the roofs. Allies determine how soon and how quickly it advances. A crumbling lower ledge and wide upper crossings create different escape demands.
+The Bellkeeper marks a column of ground before striking it with his cross. The mark stays where it was placed, giving time to dodge. Beside the altar seal, the Glamour button changes to **Take Seal**. Hold it (or **E**) for 1.5 uninterrupted seconds to take the seal. Moving, jumping, releasing the button or taking a hit breaks concentration. Taking the seal refills blood and starts the escape: the sky warms, bells and a faster pulse sound, and a wall of holy fire follows across the roofs. Silencing the bell delays and slows the fire. A crumbling lower ledge and wide upper crossings create different escape demands.
 
 Falling costs a coffin and restores the last stable roof reached; it does not restore blood or rewind the ward. Outrun the ward and reach the crypt before sunrise. The ending reflects the route taken and the allies recruited, with **Hunt Again** available immediately. Earned dirt persists, but this hunt does not grant campaign challenge marks or unlock nights.
 
@@ -45,7 +45,7 @@ Open `http://localhost:3000`. Phaser **3.60.0** loads from jsDelivr, requiring i
 | Glamour nearby human | Hold E (or J), facing them while stationary | Hold Glamour |
 | Bite glamoured human | F (or K), within close range | Bite button |
 | Swarm burst in the Bellkeeper hunt | V or Shift, after jumping for long crossings | Swarm button |
-| Unbind the Bellkeeper's seal | Hold E beside the altar seal | Hold Glamour |
+| Take the Bellkeeper's seal | Stand beside the altar seal and hold E | Hold Take Seal |
 | Fly upward as a bat | Hold Space, Up, W or Z; release to descend | Hold the rise button; release to descend |
 | Glamour a window resident | Hold E (or J) while they are calm | Hold Glamour |
 | Choose an invitation response | 1, 2 or 3 | Named response |

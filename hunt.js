@@ -20,14 +20,14 @@
     };
     const ground = (x, w) => deck(x, FLOOR, w, { ground: true, h: 120 });
     ground(0, 2600); ground(4250, 400);
-    area("THE WATCHED STREET", 0, 1600, "The shadows hide you when you stop.", [
+    area("THE WATCHED STREET", 0, 1600, "Stand still in a marked shadow to hide.", [
       [220, 545, 160], [440, 450, 140], [650, 355, 250],
       [970, 425, 150], [1210, 520, 170],
     ]);
-    area("THE BELLKEEPER", 1600, 2500, "Steal his seal. Or turn his people against him.", [
+    area("THE BELLKEEPER", 1600, 2500, "The seal is on the altar ahead.", [
       [1770, 540, 140], [1990, 450, 150], [2290, 510, 180],
     ]);
-    const escape = area("THE BURNING ROOFS", 2500, 4250, "The bell has woken the ward. Keep moving.", [
+    const escape = area("THE BURNING ROOFS", 2500, 4250, "Follow the rooftops to the crypt.", [
       [2520, 545, 160], [2770, 470, 150], [3010, 390, 160],
       [3260, 460, 120, { crumble: true }], [3470, 525, 150],
       [3710, 450, 160], [3960, 525, 170], [4230, 570, 150],
@@ -88,7 +88,7 @@
     h.hidden = hidden(w);
     if (input.dash && h.cooldown <= 0) {
       if (h.blood < 1) {
-        if (w.elapsed > h.deniedUntil) { say(w, "empty-blood", "No blood left. Bite, or take the lower roofs."); h.deniedUntil = w.elapsed + 2; }
+        if (w.elapsed > h.deniedUntil) { say(w, "empty-blood", "You need blood to use Swarm.\nBite a glamoured human or collect a syringe."); h.deniedUntil = w.elapsed + 2; }
       } else {
         h.blood--; h.dash = DASH_SECONDS; h.cooldown = 0.7; h.hidden = false; h.totalDashes++;
         w.focus = null; w.player.facing = Math.sign(input.move) || w.player.facing;
@@ -104,7 +104,7 @@
     human.suspicion = 0;
     const witnesses = w.level.humans.filter(other => other.id !== human.id && sees(w, other, human.x, human.y));
     if (witnesses.length) { h.heat = Math.min(100, h.heat + 60); h.witnesses += witnesses.length; say(w, "witness", "Someone saw the bite."); }
-    say(w, "coven-born", human.role === "priest" ? "His own blessing turns against him." : `${human.name} is yours.\n${human.role === "lamps" ? "“I'll put out the lights.”" : human.role === "bridge" ? "“I know a way across the roofs.”" : "“He won't hear the bell.”"}`);
+    say(w, "coven-born", human.role === "priest" ? "The Bellkeeper joins your coven." : `${human.name} joins your coven.\n${human.role === "lamps" ? "“I'll put out the lights.”" : human.role === "bridge" ? "“I'll open the bridge for you.”" : "“I'll cut the bell rope.”"}`);
   }
   function onCollect(w, pickup) {
     if (pickup.kind === "syringe") w.hunt.blood = Math.min(MAX_BLOOD, w.hunt.blood + 1);
@@ -112,7 +112,7 @@
     const h = w.hunt;
     h.phase = "escape"; h.sealAt = w.elapsed; h.blood = MAX_BLOOD; h.flash = 1.4;
     h.beam = null; w.projectiles = []; w.checkpoint = 2470;
-    say(w, "seal-stolen", h.bellCut ? "THE SEAL IS YOURS.\nYour coven bought you time. Run." : "THE SEAL IS YOURS.\nThe ward is burning. RUN.");
+    say(w, "seal-stolen", h.bellCut ? "You have the seal. Run to the crypt!\nThe broken bell will slow the fire behind you." : "You have the seal. Run to the crypt!\nHoly fire is coming up behind you.");
   }
   function update(w, input, dt, hurt, lose) {
     const h = w.hunt, p = w.player;
@@ -133,10 +133,10 @@
         person.y = a.fromY + (345 - a.fromY) * a.progress - Math.sin(a.progress * Math.PI) * 150;
         if (a.progress === 1) {
           h.allies++;
-          if (a.role === "lamps") { h.lampsOut = true; say(w, "sabotage", "The lamps go dark.\nThe watch has lost your trail."); }
-          if (a.role === "bridge") { h.bridgeOpen = true; w.level.platforms[w.level.bridge].active = true; say(w, "sabotage", "A bridge of shadow.\nYour watchman has opened the high route."); }
-          if (a.role === "bell") { h.bellCut = true; say(w, "sabotage", "The bell rope snaps.\nThe ward will rise more slowly."); }
-          if (a.role === "priest") { h.wardBroken = true; h.bellCut = true; h.beam = null; say(w, "sabotage", "THE BELLKEEPER KNEELS.\nHis cross can no longer find you."); }
+          if (a.role === "lamps") { h.lampsOut = true; say(w, "sabotage", "The lamplighter has put out the lights.\nGuards can still spot you up close."); }
+          if (a.role === "bridge") { h.bridgeOpen = true; w.level.platforms[w.level.bridge].active = true; say(w, "sabotage", "The watchman has opened a bridge\nbetween the upper rooftops."); }
+          if (a.role === "bell") { h.bellCut = true; say(w, "sabotage", "The bell rope is cut.\nYou'll have more time to escape with the seal."); }
+          if (a.role === "priest") { h.wardBroken = true; h.bellCut = true; h.beam = null; say(w, "sabotage", "The Bellkeeper has stopped his cross attacks\nand silenced the bell."); }
         }
       }
       if (person.state !== "human") continue;
@@ -144,17 +144,17 @@
       person.suspicion = clamp(person.suspicion + (looking ? dt / 1.8 : -dt / 1.1), 0, 1);
       if (person.suspicion >= 1 && !person.reported) {
         person.reported = true; h.heat = Math.min(100, h.heat + 55); h.witnesses++;
-        say(w, "witness", "“There! In the street!”\nBreak their sight. Find a shadow.");
+        say(w, "witness", "“There! In the street!”\nGet above the guards or hide in a marked shadow.");
       }
     }
     const lit = !h.lampsOut && h.phase === "approach" && p.y + p.h > FLOOR - 80 && !h.hidden && w.level.lanterns.some((_, i) => Math.abs(lanternX(w, i) - p.x) < 50);
     h.heat = clamp(h.heat + (lit ? 26 : h.hidden ? -24 : -2) * dt, 0, 100);
-    if (h.heat >= 99 && !h.alarm) { h.alarm = true; say(w, "alarm", "THE WATCH IS HUNTING.\nThe bell carries your name."); }
+    if (h.heat >= 99 && !h.alarm) { h.alarm = true; say(w, "alarm", "The guards have raised the alarm.\nHunters will attack more often."); }
     if (h.alarm && !h.bellCut && w.elapsed > h.nextBell) { h.nextBell = w.elapsed + 8; say(w, "bell", ""); }
     if (!h.wardBroken && h.phase === "approach" && p.x > 1900 && p.x < 2510) {
       if (!h.beam && w.elapsed >= h.nextBeam) {
         h.beam = { x: p.x + p.vx * 0.22, age: 0 };
-        say(w, "consecrate", "The cross marks the ground. MOVE.");
+        say(w, "consecrate", "Move out of the gold column before it strikes!");
       }
       if (h.beam) {
         h.beam.age += dt;
@@ -168,10 +168,10 @@
       if (p.x < h.pursuitX && p.y < 720) lose(w, "The Bellkeeper's ward caught you on the roofs.");
     }
     for (const [id, condition, text] of [
-      ["first", p.x > 180, "Turn the lamplighter to darken the street.\nHold E to glamour. Move close; F to bite."],
-      ["choice", p.x > 560, "The watch owns the street.\nThe rooftops belong to you."],
-      ["blood", p.x > 1100, "Jump, then SWARM to cross farther.\nEach burst costs blood. A bite restores it."],
-      ["priest", p.x > 1750, "Hold GLAMOUR beside the seal to break its ward.\nMove when the cross marks the ground."],
+      ["first", p.x > 180, "The lamplighter can put out the streetlights.\nGlamour him, then get close and bite to recruit him."],
+      ["choice", p.x > 560, "You can avoid the guards by taking the rooftops."],
+      ["blood", p.x > 1100, "For a longer jump, use Swarm while in the air.\nEach use costs one blood charge."],
+      ["priest", p.x > 1750, "Climb to the seal on the altar.\nStand beside it and hold Take Seal (E)."],
     ]) if (condition && !h.told.has(id)) { h.told.add(id); say(w, "hunt-hint", text); }
   }
   function objective(w) {
