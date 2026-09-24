@@ -12,6 +12,8 @@ class GameObject extends EventEmitter {
     this.y = y;
     this.key = key;
     this.active = true;
+    this.visible = true;
+    this.depth = 0;
     this.alpha = 1;
     this.scrollFactorX = this.scrollFactorY = 1;
     this.width = 0; this.height = 0;
@@ -39,6 +41,7 @@ class GameObject extends EventEmitter {
     this.alpha = alpha;
     return this;
   }
+  setVisible(visible) { this.visible = visible; return this; }
   setScrollFactor(x, y = x) { this.scrollFactorX = x; this.scrollFactorY = y; return this; }
   setOrigin(x, y = x) { this.originX = x; this.originY = y; return this; }
   setDepth(depth) { this.depth = depth; return this; }
@@ -66,7 +69,7 @@ class GameObject extends EventEmitter {
   }
 }
 for (const method of [
-  "setDisplaySize", "setScale", "setVisible",
+  "setDisplaySize", "setScale",
   "setStrokeStyle",
   "setCircle",
   "setCollideWorldBounds",
@@ -127,6 +130,7 @@ function loadGame() {
     VampRules: rules,
     VampAudio: require("../audio"),
     VampBat: require("../bat"),
+    VampHunt: require("../hunt"),
     localStorage: {
       getItem: (key) => storage.get(key) ?? null,
       setItem: (key, value) => storage.set(key, value),
@@ -168,9 +172,10 @@ function loadGame() {
       "graphics",
       "container",
     ])
-      scene.add[type] = (x, y, key, height) => {
+      scene.add[type] = (x, y, key, height, fillAlpha = 1) => {
         const obj = new GameObject(x, y, key);
-        if (type === "rectangle") { obj.width = key; obj.height = height; }
+        obj.type = type;
+        if (type === "rectangle") { obj.width = key; obj.height = height; obj.fillAlpha = fillAlpha; }
         scene.objects.push(obj);
         return obj;
       };
@@ -245,7 +250,7 @@ function loadGame() {
   // regression: a fixed display container with a world-scrolling child hit area.
   function tap(scene, x, y, id = 1) {
     const camera = scene.cameras.main;
-    const objects = scene.objects.filter((o) => o.active && o.interactive).sort((a, b) => (b.depth || 0) - (a.depth || 0) || scene.objects.indexOf(b) - scene.objects.indexOf(a));
+    const objects = scene.objects.filter((o) => o.active && o.visible && o.interactive).sort((a, b) => (b.depth || 0) - (a.depth || 0) || scene.objects.indexOf(b) - scene.objects.indexOf(a));
     for (const o of objects) {
       const px = x + (camera.scrollX || 0) * o.scrollFactorX;
       const py = y + (camera.scrollY || 0) * o.scrollFactorY;
@@ -256,6 +261,20 @@ function loadGame() {
     }
     return null;
   }
+  // Detect solid UI panels painted over the centre of a control or caption.
+  // This checks display-list ordering, not just whether a hidden button takes input.
+  function coveringPanels(scene, object) {
+    const camera = scene.cameras.main, index = scene.objects.indexOf(object);
+    const x = object.x - (camera.scrollX || 0) * object.scrollFactorX;
+    const y = object.y - (camera.scrollY || 0) * object.scrollFactorY;
+    return scene.objects.filter((o, i) => {
+      if (o.type !== "rectangle" || !o.active || !o.visible || o.alpha * o.fillAlpha < 0.9) return false;
+      if (o.depth < object.depth || (o.depth === object.depth && i <= index)) return false;
+      const left = o.x - (camera.scrollX || 0) * o.scrollFactorX - o.width * o.originX;
+      const top = o.y - (camera.scrollY || 0) * o.scrollFactorY - o.height * o.originY;
+      return x >= left && x <= left + o.width && y >= top && y <= top + o.height;
+    });
+  }
   return {
     ...context.module.exports,
     context,
@@ -265,6 +284,7 @@ function loadGame() {
     elements,
     wire,
     tap,
+    coveringPanels,
   };
 }
 module.exports = { loadGame };

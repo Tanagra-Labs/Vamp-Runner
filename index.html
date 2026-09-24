@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#0b1018" />
     <meta
       name="description"
-      content="Twelve nights. Eight districts. Run, fly, glamour and bite your way home before sunrise in Vamp Runner, from Tanagra Labs."
+      content="Hunt the Bellkeeper. Turn his people, steal his seal and escape the burning roofs. A vampire platformer from Tanagra Labs."
     />
     <title>Vamp Runner · Tanagra Labs</title>
     <link rel="stylesheet" href="styles.css" />
@@ -20,11 +20,11 @@
         <p class="eyebrow">TANAGRA LABS / ARCADE 01</p>
         <h1>Dawn waits<br />for no one.</h1>
         <p class="lede">
-          A little blood.<br />A little grave dirt.<br />Another night alive.
+          Steal from a saint.<br />Make his people yours.<br />Survive what comes next.
         </p>
         <div class="rule"></div>
         <p class="small">
-          Twelve nights. Eight districts.<br />A city with no love for the undead.
+          The Bellkeeper is waiting.<br />Twelve campaign nights lie beyond.
         </p>
         <p class="edition">RUN. FLY. GLAMOUR. BITE.</p>
       </aside>
@@ -32,7 +32,7 @@
         <div
           id="game"
           tabindex="0"
-          aria-label="Vamp Runner. Enter starts. Left and Right or A and D move. Space jumps. Hold E while stationary and facing a human to glamour; approach and press F to bite. In bat flight, hold Space to rise and release to descend. Escape pauses. Touch controls are shown."
+          aria-label="Vamp Runner. Enter starts the Bellkeeper hunt. Left and Right or A and D move. Space jumps. Hold E while stationary and facing a human to glamour; approach and press F to bite. In the Bellkeeper hunt, V or Shift bursts forward as a swarm, costing one blood. Bite or collect blood to refill. Hold E at the seal to unbind it. The campaign bat flies right automatically: hold Space or Up to rise and release to descend. At the window, hold E to glamour, then choose a promise with 1, 2 or 3. Escape pauses. Touch controls are shown."
         >
           <div id="loading" role="status">
             <span class="eyebrow">THE CITY IS SLEEPING</span>
@@ -46,22 +46,22 @@
         <div class="legend">
           <span class="symbol crypt">◇</span>
           <div>
-            <h2>Unlock your crypt</h2>
-            <p>Find every blue key. Follow the arrow.<br />Get home before sunrise.</p>
+            <h2>Steal the Bellkeeper's seal</h2>
+            <p>Stand beside the seal and hold Take Seal (E).<br />Move out of the gold column before it strikes.</p>
           </div>
         </div>
         <div class="legend">
           <span class="symbol blood">✧</span>
           <div>
-            <h2>Take what you need</h2>
-            <p>Syringes heal garlic damage.<br />IV blood gives temporary protection.</p>
+            <h2>Become a swarm</h2>
+            <p>Jump, then burst across the gap.<br />Bites and blood syringes restore your power.</p>
           </div>
         </div>
         <div class="legend">
           <span class="symbol ally">○</span>
           <div>
-            <h2>Make another vampire</h2>
-            <p>Hold glamour, move close, then bite.<br />Earn dirt and healing. Three bites earn a shield.</p>
+            <h2>Turn the city against him</h2>
+            <p>Your recruits can darken the street,<br />open a bridge, or silence the bell.</p>
           </div>
         </div>
         <div class="rule"></div>
@@ -86,14 +86,18 @@
             <dd>HOLD E</dd>
           </div>
           <div><dt>Bite</dt><dd>F</dd></div>
-          <div><dt>Bat flight</dt><dd>HOLD SPACE</dd></div>
+          <div><dt>Take seal (altar)</dt><dd>HOLD E</dd></div>
+          <div><dt>Swarm (hunt)</dt><dd>V / SHIFT</dd></div>
+          <div><dt>Bat rise</dt><dd>HOLD SPACE / ↑</dd></div>
+          <div><dt>Bat descend</dt><dd>RELEASE</dd></div>
+          <div><dt>Promise</dt><dd>1 / 2 / 3</dd></div>
           <div>
             <dt>Pause</dt>
             <dd>ESC / P</dd>
           </div>
         </dl>
         <p class="small">
-          Hold an arrow and tap Jump or Bite.<br />Release movement and hold Glamour<br />to focus. As a bat, hold Flap to rise.<br />Save &amp; Quit at the crypt to continue later.
+          Stand still in marked shadows to hide.<br />Bite where other humans cannot see you.<br />Once you take the seal, outrun the holy fire.<br /><br />In the campaign, collect blue crypt keys.<br />The bat flies right automatically:<br />hold Space / ↑ to rise, release to descend.<br />At a window, hold Glamour (E) while the resident is calm. Then tap a reply or press 1, 2 or 3.<br />Save &amp; Quit at a crypt to continue later.
         </p>
       </aside>
     </main>
@@ -111,6 +115,7 @@
       onerror="document.getElementById('loading').innerHTML='<h2>The night is out of reach.</h2><p>The game engine could not load. Check your connection and reload this page.</p>'"
     ></script>
     <script src="levels.js"></script>
+    <script src="hunt.js"></script>
     <script src="rules.js"></script>
     <script src="audio.js"></script>
     <script src="bat.js"></script>

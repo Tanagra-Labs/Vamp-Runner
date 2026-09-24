@@ -29,6 +29,7 @@ test("serves all game assets, query strings and health without exposing reposito
     "/game.js",
     "/rules.js",
     "/levels.js",
+    "/hunt.js",
     "/audio.js",
     "/bat.js",
     "/game.js?v=1",

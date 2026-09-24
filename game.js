@@ -1,5 +1,5 @@
 // Vamp Runner — a mobile vampire platformer. Phaser 3.60, no build step.
-/* global Phaser, VampRules, VampAudio, VampBat */
+/* global Phaser, VampRules, VampAudio, VampBat, VampHunt */
 const {
   FLOOR, MAX_LIVES, STEP, UPGRADES, COFFIN_COST, GATE_HALF_WIDTH, CAMPAIGN, createWorld, step,
   cleanProgress, cleanRun, purchase, targetHuman, canGlamour, interruptGlamour, advanceClock, dawnState, cleanScores, contractResults, pulseState, gateState, nightSettings, sectionAt,
@@ -335,38 +335,39 @@ class MenuScene extends Phaser.Scene {
     const progress = Save.progress();
     const medals = progress.medals.reduce((sum, mask) => sum + [1, 2, 4].filter((bit) => mask & bit).length, 0);
     label(this, 26, 313, `12 NIGHTS · 8 DISTRICTS · ${medals}/36 MARKS`, 10, "#dfb778", true);
-    label(this, 24, 395, "Make it home before dawn.", 24);
+    label(this, 24, 395, "Tonight, steal from a saint.", 23);
     label(
       this,
       24,
       435,
-      "Find the blue keys. Unlock your crypt.\nThree garlic hits or one cross: lose a coffin.",
+      "Steal the Bellkeeper's seal and reach your crypt.\nRecruit allies to help you escape.",
       14,
       "#afbec9",
     ).setLineSpacing(6);
     const rows = [
-      ["01", "RUN & JUMP", "← → / A D / Q D. Space to jump."],
-      ["02", "GLAMOUR → BITE", "Hold E, face them, stay still. F to bite."],
-      ["03", "BUILD YOUR COVEN", "Dirt + healing. Three bites earn a shield."],
+      ["01", "MOVE & HIDE", "← → to move. Space to jump. Stop in shadows."],
+      ["02", "RECRUIT ALLIES", "Hold Glamour (E), then get close and Bite (F)."],
+      ["03", "CROSS LONGER GAPS", "Jump, then use Swarm (V). Costs one blood."],
     ];
     rows.forEach(([num, title, copy], i) => {
-      const y = 500 + i * 54;
+      const y = 490 + i * 47;
       label(this, 24, y, num, 11, "#bd7485", true);
       label(this, 57, y, title, 11, "#eee5d3", true);
       label(this, 57, y + 19, copy, 12, "#a5b5c4");
     });
     this.checkpoint = Save.run();
+    button(this, 195, 657, 342, "HUNT THE BELLKEEPER →", () => this.startHunt(), true);
     button(
       this,
-      195,
-      684,
-      342,
-      this.checkpoint ? `CONTINUE · NIGHT ${this.checkpoint.nightNumber} →` : "START THE CAMPAIGN →",
+      this.checkpoint ? 107 : 195,
+      719,
+      this.checkpoint ? 166 : 342,
+      this.checkpoint ? `CONTINUE · ${this.checkpoint.nightNumber}` : "START THE CAMPAIGN →",
       () => this.startRun(),
-      true,
+      false,
     );
-    if (this.checkpoint) button(this, 195, 742, 342, "START A NEW HUNT", () => this.startRun(false));
-    else label(this, 195, 737, "Crypts save your place between nights.", 12, "#a9bac8").setOrigin(0.5);
+    if (this.checkpoint) button(this, 283, 719, 166, "NEW CAMPAIGN", () => this.startRun(false));
+    label(this, 195, 765, "A city that remembers what you do.", 12, "#a9bac8").setOrigin(0.5);
     this.soundButton = button(this, 105, 805, 158, "", () =>
       this.toggleSound(),
     );
@@ -375,10 +376,10 @@ class MenuScene extends Phaser.Scene {
     );
     this.refreshSettings();
     this.starting = false;
-    onKey(this, "keydown-ENTER", () => this.startRun());
-    onKey(this, "keydown-SPACE", () => this.startRun());
+    onKey(this, "keydown-ENTER", () => this.startHunt());
+    onKey(this, "keydown-SPACE", () => this.startHunt());
     announce(
-      "Vamp Runner. Reach the crypt before sunrise. Press Enter to start.",
+      "Vamp Runner. Press Enter to hunt the Bellkeeper. The twelve-night campaign is also available below.",
     );
   }
   refreshSettings() {
@@ -408,6 +409,11 @@ class MenuScene extends Phaser.Scene {
     if (!checkpoint) Save.write("vampRunnerCampaign", null);
     this.scene.start(checkpoint ? "Bat" : "Game", { seed: Math.floor(Math.random() * 0xffffffff), ...checkpoint, profile: Save.progress() });
   }
+  startHunt() {
+    if (this.starting) return;
+    this.starting = true; Sfx.play("bell");
+    this.scene.start("Game", { mode: "bellkeeper", profile: Save.progress(), seed: 1 });
+  }
 }
 
 class GameScene extends Phaser.Scene {
@@ -432,6 +438,7 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.setScroll(0, 0);
     this.drawCity();
     this.drawLevel();
+    if (this.world.hunt) this.drawHunt();
     this.player = this.add.image(80, FLOOR, "player").setOrigin(0.5, 1).setDisplaySize(44, 47).setDepth(10);
     this.targetGraphic = this.add.graphics().setDepth(11);
     this.buildHUD();
@@ -448,7 +455,8 @@ class GameScene extends Phaser.Scene {
     });
     this.renderWorld();
     this.message.setText(`${this.world.level.name}\n${Math.ceil(this.world.timeLeft)}s until sunrise · ${this.world.level.requiredKeys} crypt keys${this.world.level.theme.underground ? "\nOnly your sealed crypt stops the dawn curse." : this.world.level.oneWay ? "\nOne way: gates seal behind you." : ""}`);
-    announce(`Night ${this.world.night}: ${this.world.level.name}. Find ${this.world.level.requiredKeys} crypt keys before sunrise.${this.world.level.oneWay ? " Gates seal behind you when you enter the next section." : ""}`);
+    if (this.world.hunt) { this.message.setText("THE BELLKEEPER\nSteal his seal. Bring it home before dawn."); this.messageUntil = 4; }
+    announce(this.world.hunt ? "The Bellkeeper. Take the seal from the altar and reach your crypt before sunrise." : `Night ${this.world.night}: ${this.world.level.name}. Find ${this.world.level.requiredKeys} crypt keys before sunrise.${this.world.level.oneWay ? " Gates seal behind you when you enter the next section." : ""}`);
   }
   fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
   drawCity() {
@@ -520,10 +528,150 @@ class GameScene extends Phaser.Scene {
     this.dawn.fillTriangle(95, 197, 120, FLOOR, 171, FLOOR);
     this.dawn.fillTriangle(310, 197, 252, FLOOR, 294, FLOOR);
   }
+  drawHunt() {
+    const w = this.world, g = this.add.graphics().setDepth(0);
+    // The tower is a world landmark, so it grows into view as you approach.
+    for (const x of [2020, 2240]) {
+      g.fillStyle(0x242332); g.fillRect(x, 245, 100, FLOOR - 245);
+      g.fillTriangle(x - 8, 245, x + 50, 164, x + 108, 245);
+      g.lineStyle(2, 0x766278, 0.6); g.lineBetween(x + 12, 270, x + 12, FLOOR);
+      g.fillStyle(0x0c101b); g.fillRoundedRect(x + 26, 279, 48, 110, 24);
+    }
+    g.fillStyle(0x373041); g.fillRect(2100, 285, 170, 340);
+    g.fillTriangle(2080, 285, 2185, 222, 2290, 285);
+    g.lineStyle(5, 0x766278); g.strokeCircle(2185, 365, 58);
+    g.fillStyle(0x563746); g.fillCircle(2185, 365, 53);
+    for (let j = 0; j < 12; j++) {
+      const a = j * Math.PI / 6;
+      g.lineStyle(2, 0xcc946f, 0.65);
+      g.lineBetween(2185, 365, 2185 + Math.cos(a) * 48, 365 + Math.sin(a) * 48);
+    }
+    g.fillStyle(0xe3bb73, 0.75); g.fillCircle(2185, 365, 12);
+    g.fillStyle(0x101522); g.fillRoundedRect(2157, 455, 56, 170, 28);
+    g.fillStyle(0x9e8067); g.fillRoundedRect(2170, 269, 30, 35, 12);
+    g.fillRect(2164, 301, 42, 5); g.fillCircle(2185, 310, 5);
+    g.lineStyle(2, 0xa68c77, 0.7); g.lineBetween(2185, 311, 2185, 485);
+    label(this, 2185, 210, "THE BELLKEEPER", 15, "#e3bb73", true).setOrigin(0.5).setDepth(4);
+    for (const s of w.level.shadows) {
+      g.fillStyle(0x060b17, 0.94); g.fillRoundedRect(s.x, FLOOR - 117, s.w, 116, 34);
+      g.lineStyle(2, 0x706a9e, 0.65); g.lineBetween(s.x, FLOOR - 2, s.x + s.w, FLOOR - 2);
+      label(this, s.x + s.w / 2, FLOOR - 98, "SHADOW", 10, "#b5afd7", true).setOrigin(0.5).setDepth(4);
+    }
+    for (const x of w.level.lanterns) {
+      g.lineStyle(3, 0x8b7561); g.lineBetween(x, 418, x, FLOOR);
+      g.lineBetween(x, 418, x + 30, 418);
+      g.fillStyle(0x8b7561); g.fillRoundedRect(x + 18, 418, 24, 30, 4);
+    }
+    label(this, 2620, 320, "HIGH ROOFS · JUMP + SWARM →", 11, "#c6b3e8", true).setOrigin(0.5).setDepth(4);
+    label(this, 2640, 593, "LOW ROOFS →", 11, "#dfb778", true).setOrigin(0.5).setDepth(4);
+    this.sealLabel = label(this, 2380, 415, "STAND BESIDE THE SEAL\nHOLD TAKE SEAL (E)", 11, "#dfb778", true).setOrigin(0.5).setAlign("center").setDepth(15);
+    this.huntGraphic = this.add.graphics().setDepth(14);
+    this.huntAir = this.fixed(this.add.graphics(), 42);
+    this.huntHeat = this.fixed(this.add.graphics(), 52);
+    this.huntNames = w.level.humans.map(h => label(this, h.x, h.y - 24, h.name, 11, "#d4c6b3").setOrigin(0.5).setDepth(15));
+    this.huntBursts = [];
+  }
+  renderHunt() {
+    const w = this.world, h = w.hunt, p = w.player, g = this.huntGraphic, air = this.huntAir;
+    const clock = preferences.reducedMotion ? 0 : w.elapsed;
+    g.clear(); air.clear(); this.huntHeat.clear();
+    this.routeText.setText(h.phase === "escape" ? "HOLY FIRE BEHIND YOU · KEEP MOVING" : h.hidden ? h.alarm ? "HIDDEN · GUARDS ARE STILL ALERT" : "HIDDEN · OUT OF SIGHT" : h.alarm ? "ALARM RAISED · HUNTERS ATTACK FASTER" : h.heat > 25 ? "GUARDS ARE SUSPICIOUS · FIND COVER" : "NO ALARM");
+    this.keyText.setText(VampHunt.objective(w));
+    this.questText.setText(`BLOOD ${"◆".repeat(h.blood)}${"◇".repeat(3 - h.blood)} · ${h.allies} ALLIES`);
+    this.covenText.setText(h.phase === "escape" ? `${Math.max(0, Math.ceil((p.x - h.pursuitX) / 10))}m AHEAD OF THE FIRE${h.bellCut ? " · BELL SILENCED" : ""}` : h.hidden ? "You're hidden while you stay still." : "Bite a glamoured human to recruit them.");
+    this.huntHeat.fillStyle(C.line, 0.65); this.huntHeat.fillRect(20, 207, 282, 3);
+    this.huntHeat.fillStyle(h.alarm ? C.red : C.gold); this.huntHeat.fillRect(20, 207, 282 * h.heat / 100, 3);
+    this.swarmButton.bg.setAlpha(h.blood > 0 && h.cooldown <= 0 ? 1 : 0.4);
+    this.swarmButton.caption.setText(h.blood ? "SWARM · V" : "NO BLOOD");
+    if (h.hidden) this.player.setAlpha(0.46);
+    this.player.setVisible(h.dash <= 0);
+    this.sealLabel.setVisible(h.phase === "approach");
+    const bat = (x, y, size, color) => {
+      const wing = Math.sin(clock * 38 + x * 0.12) * size * 0.4;
+      g.fillStyle(color); g.fillEllipse(x, y, size * 0.8, size * 0.6);
+      g.fillTriangle(x, y, x - size * 2, y - size + wing, x - size * 1.2, y + size * 0.45);
+      g.fillTriangle(x, y, x + size * 2, y - size + wing, x + size * 1.2, y + size * 0.45);
+    };
+    if (h.dash > 0) for (let i = 0; i < 9; i++) bat(p.x - p.facing * i * 10, p.y + 20 + Math.sin(i * 2.4) * 20, 4 + i % 3, i % 2 ? 0x111427 : 0xc38cad);
+    w.level.humans.forEach((human, i) => {
+      const ally = human.ally;
+      this.humans[i].setVisible(!ally);
+      this.huntNames[i].setVisible(!ally && Math.abs(p.x - human.x) < 250).setPosition(human.x, human.y - 24);
+      if (ally) {
+        this.priestLabels[i]?.setVisible(false);
+        if (ally.progress < 1) { bat(human.x, human.y, 6, C.mint); bat(human.x - 15, human.y + 12, 4, C.mint); }
+        return;
+      }
+      if (human.suspicion > 0 && human.state === "human") {
+        g.lineStyle(2, C.gold, 0.7); g.strokeCircle(human.x, human.y - 42, 9);
+        g.fillStyle(C.gold); g.fillRect(human.x - 2, human.y - 48, 4, 12 * human.suspicion);
+      }
+    });
+    if (!h.lampsOut && h.phase !== "escape") w.level.lanterns.forEach((x, i) => {
+      const target = VampHunt.lanternX(w, i);
+      g.fillStyle(C.gold, 0.055); g.fillTriangle(x + 30, 444, target - 56, FLOOR, target + 56, FLOOR);
+      g.fillStyle(C.gold, 0.12); g.fillEllipse(target, FLOOR - 4, 100, 15);
+      g.fillStyle(0xffd68f, 0.9); g.fillRect(x + 24, 425, 12, 17);
+    });
+    const bridge = w.level.platforms[w.level.bridge];
+    g.lineStyle(h.bridgeOpen ? 3 : 1, 0xba9ae7, h.bridgeOpen ? 1 : 0.2);
+    g.lineBetween(bridge.x, bridge.y, bridge.x + bridge.w, bridge.y);
+    if (h.bridgeOpen) {
+      g.fillStyle(0x8c70b5, 0.5); g.fillRect(bridge.x, bridge.y, bridge.w, 12);
+      for (let i = 0; i < 8; i++) bat(bridge.x + i * 25, bridge.y + 18, 3, 0xaa8fc8);
+    }
+    if (h.beam) {
+      const active = h.beam.age > 1.2, x = h.beam.x;
+      g.fillStyle(0xffe7a6, active ? 0.28 : 0.06); g.fillRect(x - 39, 293, 78, FLOOR - 293);
+      g.lineStyle(active ? 5 : 2, C.gold, active ? 1 : 0.7);
+      g.lineBetween(x, 330, x, FLOOR); g.lineBetween(x - 32, 398, x + 32, 398);
+      g.strokeEllipse(x, FLOOR - 5, 85, 18);
+      if (active) { g.fillStyle(0xfff4c6, 0.8); g.fillRect(x - 5, 320, 10, FLOOR - 320); }
+    }
+    if (h.phase === "escape") {
+      const front = h.pursuitX, screen = front - this.cameras.main.scrollX;
+      g.fillStyle(0xefa66b, 0.14); g.fillRect(Math.max(0, front - 390), 250, Math.min(front, 390), 380);
+      g.lineStyle(5, 0xffda9b, 0.75); g.lineBetween(front, 255, front, FLOOR + 10);
+      for (let i = 0; i < 18; i++) {
+        const y = 280 + i * 20, offset = preferences.reducedMotion ? i % 4 * 4 : Math.sin(clock * 9 + i) * 14;
+        g.fillStyle(i % 2 ? 0xf2b07c : 0xffe7b9, 0.4);
+        g.fillTriangle(front - 22, y + 18, front + offset, y - 20, front + 14, y + 20);
+      }
+      air.fillStyle(0xb64a40, 0.12); air.fillRect(0, 212, 390, 424);
+      if (screen < 0) {
+        air.fillStyle(C.gold, 0.85); air.fillTriangle(7, 362, 19, 354, 19, 370);
+        air.lineStyle(2, C.gold, 0.65); air.lineBetween(6, 340, 6, 385);
+      }
+    }
+    // Wind-blown ash and low fog give motion a direction without hiding landings.
+    for (let i = 0; i < 17; i++) {
+      const x = ((i * 83 - clock * (h.phase === "escape" ? 55 : 12)) % 430 + 430) % 430;
+      const y = 320 + (i * 53) % 285;
+      air.fillStyle(h.phase === "escape" ? 0xf0b17e : 0xc3b7d7, h.phase === "escape" ? 0.45 : 0.17);
+      air.fillCircle(x, y, i % 3 ? 1 : 2);
+    }
+    this.huntBursts = this.huntBursts.filter(b => w.elapsed - b.at < 0.7);
+    for (const b of this.huntBursts) {
+      const age = (w.elapsed - b.at) / 0.7;
+      g.lineStyle(2, b.color, (1 - age) * 0.8); g.strokeCircle(b.x, b.y, preferences.reducedMotion ? 24 : 10 + age * 62);
+    }
+    const nearby = targetHuman(w);
+    if (!nearby && !w.focus) this.hint.setText(h.hidden ? "Hidden. Move when you're ready." : h.phase === "escape" ? h.blood ? "Keep heading right toward the crypt." : "Take the lower roofs. You don't need Swarm there." : h.blood ? "Swarm (V) sends you forward. Jump first to cross gaps." : "Bite or collect a syringe to restore blood.");
+    this.stunButton.caption.setText("GLAMOUR");
+    if (VampHunt.atSeal(w)) {
+      this.stunButton.caption.setText("TAKE SEAL");
+      this.hint.setText(Math.abs(p.vx) >= 24 ? "Stop beside the seal, then hold Take Seal (E)." : "Hold Take Seal (E) until the bar fills.");
+      this.stunButton.bg.setAlpha(1);
+    }
+    if (h.phase === "approach") {
+      g.lineStyle(2, C.gold, 0.75); g.strokeCircle(2380, 480, 25);
+      g.fillStyle(C.gold); g.fillRect(2348, 439, 64 * Math.min(1, h.sealFocus / 1.5), 4);
+    }
+  }
   drawLevel() {
     const level = this.world.level, g = this.add.graphics().setDepth(1);
     for (const p of level.platforms) {
-      if (p.motion || p.crumble) continue;
+      if (p.motion || p.crumble || p.shadowBridge) continue;
       if (p.bonus) {
         // A cache balcony must leave the lower route visible beneath it.
         g.fillStyle(0x364553); g.fillRoundedRect(p.x, p.y, p.w, 14, 3);
@@ -614,7 +762,7 @@ class GameScene extends Phaser.Scene {
   }
   buildHUD() {
     this.fixed(this.add.rectangle(195, 72, 390, 144, C.ink, 0.97));
-    this.fixed(label(this, 20, 19, `NIGHT ${String(this.world.night).padStart(2, "0")}${this.world.night <= 12 ? "/12" : " · BLOOD MOON"}`, 12, "#dfb778", true));
+    this.fixed(label(this, 20, 19, this.world.hunt ? "THE BELLKEEPER" : `NIGHT ${String(this.world.night).padStart(2, "0")}${this.world.night <= 12 ? "/12" : " · BLOOD MOON"}`, 12, "#dfb778", true));
     this.clock = this.fixed(label(this, 370, 18, "", 15, "#eee5d3", true).setOrigin(1, 0));
     this.fixed(this.add.rectangle(20, 54, 350, 4, C.line).setOrigin(0, 0.5));
     this.sunBar = this.fixed(this.add.rectangle(20, 54, 350, 4, C.gold).setOrigin(0, 0.5));
@@ -634,7 +782,7 @@ class GameScene extends Phaser.Scene {
     this.fixed(label(this, 351, 174, "Ⅱ", 21).setOrigin(0.5));
     pause.on("pointerdown", (_p, _x, _y, event) => { event?.stopPropagation(); this.pauseGame(); });
     this.fixed(this.add.rectangle(195, 758, 390, 172, C.ink, 0.98));
-    this.hint = this.fixed(label(this, 195, 687, "", 12, "#c4b28d", true).setOrigin(0.5));
+    this.hint = this.fixed(label(this, 195, 687, "", 12, "#c4b28d", true).setOrigin(0.5).setWordWrapWidth(358).setAlign("center"));
   }
   buildControls() {
     this.keys = this.input.keyboard.addKeys("LEFT,RIGHT,A,D,Q,E,J");
@@ -644,6 +792,7 @@ class GameScene extends Phaser.Scene {
       if (this.paused || this.transitioning) return;
       if (["Space", "ArrowUp", "KeyW", "KeyZ"].includes(e.code)) { e.preventDefault?.(); this.pending.jump = true; }
       if (["KeyF", "KeyK"].includes(e.code)) this.pending.bite = true;
+      if (["KeyV", "ShiftLeft", "ShiftRight"].includes(e.code) && this.world.hunt) this.pending.dash = true;
     });
     this.input.keyboard.addCapture?.(["SPACE", "UP", "LEFT", "RIGHT"]);
     this.moveButtons = [];
@@ -665,8 +814,9 @@ class GameScene extends Phaser.Scene {
     this.stunButton.bg.on("pointerdown", pointer => { if (!this.paused) { Sfx.unlock(); this.glamourHeld.add(pointer.id); } });
     this.stunButton.bg.on("pointerout", pointer => this.glamourHeld.delete(pointer.id));
     this.biteButton = button(this, 329, 737, 92, "BITE · F", () => { if (!this.paused) this.pending.bite = true; });
-    this.jumpButton = button(this, 276, 798, 198, "JUMP ↑", () => { if (!this.paused) this.pending.jump = true; }, true);
-    for (const item of [this.stunButton, this.biteButton, this.jumpButton]) { this.fixed(item.bg); this.fixed(item.caption); }
+    this.jumpButton = button(this, this.world.hunt ? 329 : 276, 798, this.world.hunt ? 92 : 198, "JUMP ↑", () => { if (!this.paused && !this.transitioning) this.pending.jump = true; }, true);
+    this.swarmButton = this.world.hunt ? button(this, 223, 798, 92, "SWARM · V", () => { if (!this.paused && !this.transitioning) this.pending.dash = true; }) : null;
+    for (const item of [this.stunButton, this.biteButton, this.jumpButton, this.swarmButton].filter(Boolean)) { this.fixed(item.bg, 60); this.fixed(item.caption, 61); }
     this.events.once("shutdown", () => this.input.removeAllListeners());
   }
   resetInput() { this.held?.clear(); this.glamourHeld?.clear(); this.pending = {}; this.input.keyboard.resetKeys(); if (this.world) interruptGlamour(this.world); }
@@ -680,7 +830,7 @@ class GameScene extends Phaser.Scene {
     dim.on("pointerdown", (_p, _x, _y, e) => e?.stopPropagation());
     add(label(this, 195, 228, "THE NIGHT CAN WAIT.", 27).setOrigin(0.5));
     if (this.world.level.oneWay) add(label(this, 195, 416, "ONE WAY · GATES SEAL BEHIND YOU", 11, "#dfb778", true).setOrigin(0.5));
-    add(label(this, 195, 285, "Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nHold E: glamour · F: bite\nStay still. Face the human.", 15, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(14));
+    add(label(this, 195, 285, `Move  ← → / A D / Q D\nJump  Space / ↑ / W / Z\nHold E: glamour · F: bite\n${this.world.hunt ? "V / Shift: swarm (1 blood)\nAt the altar: hold Take Seal (E)" : "Stop and face them to glamour."}`, 15, "#acbdc9", true).setOrigin(0.5, 0).setLineSpacing(10));
     const contracts = contractResults(this.world).map((c) => `${c.complete ? "✓" : "○"} ${c.title}: ${c.key === "untouched" ? c.value === 0 ? "on track" : "missed" : c.value + "/" + c.target} (+${c.reward} dirt)`);
     add(label(this, 195, 440, "OPTIONAL NIGHT CHALLENGES", 11, "#dfb778", true).setOrigin(0.5));
     add(label(this, 195, 477, contracts.join("\n"), 13, "#dfb778").setOrigin(0.5).setAlign("center").setLineSpacing(8));
@@ -712,16 +862,19 @@ class GameScene extends Phaser.Scene {
   completeNight() {
     if (this.transitioning || this.world.status !== "safe") return;
     this.transitioning = true; this.resetInput(); this.saveProgress();
+    if (this.world.hunt) { this.scene.start("HuntEnd", { world: this.world, won: true }); return; }
     this.scene.start("Crypt", this.runSnapshot());
   }
   finishRun(reason = this.world.reason) {
     if (this.transitioning) return;
     this.transitioning = true; this.resetInput(); this.saveProgress();
+    if (this.world.hunt) { this.scene.start("HuntEnd", { world: this.world, won: false, reason }); return; }
     Save.write("vampRunnerCampaign", null);
     this.scene.start("Score", { score: this.world.score, nights: this.world.night - 1, reason, profile: this.world.profile });
   }
   showSunrise() {
     if (this.transitioning) return;
+    if (this.world.hunt) { this.finishRun(); return; }
     this.transitioning = true; this.resetInput(); this.saveProgress();
     Save.write("vampRunnerCampaign", null);
     const glow = this.fixed(this.add.rectangle(195, 422, 390, 844, 0xf2b575, 0.65), 80);
@@ -734,12 +887,18 @@ class GameScene extends Phaser.Scene {
   }
   showEvents() {
     for (const event of this.world.events.splice(0)) {
+      if (this.world.hunt && ["bite", "stun", "swarm", "key"].includes(event.kind)) this.huntBursts.push({ x: event.x ?? this.world.player.x, y: event.y ?? this.world.player.y, at: this.world.elapsed, color: event.kind === "bite" ? C.red : C.mint });
       if (event.kind === "jump") { Sfx.play("jump"); continue; }
       if (event.kind === "dawn-warning") this.warningUntil = this.world.elapsed + 3;
+      if (["seal-stolen", "sabotage", "coven-born", "alarm", "hunt-hint"].includes(event.kind)) {
+        this.message.setText(event.text); this.messageUntil = this.world.elapsed + 4;
+        this.warningUntil = this.world.elapsed + 2.5; announce(event.text);
+      }
       if (event.text && (event.kind === "dawn-warning" || this.world.elapsed >= this.warningUntil)) { this.message.setText(event.text); this.messageUntil = this.world.elapsed + (event.kind === "dawn-warning" ? 3 : 2); }
       if (["dirt", "stun", "bite"].includes(event.kind)) this.saveProgress();
       if (!["section", "locked", "gate-locked", "safe"].includes(event.kind)) Sfx.play(event.kind);
       if (event.kind === "hurt" && !preferences.reducedMotion) this.cameras.main.shake(110, 0.004);
+      if (event.kind === "seal-stolen" && !preferences.reducedMotion) this.cameras.main.shake(500, 0.009);
       if (["bite", "iv", "hurt", "key", "locked", "section", "gate-locked", "gate-sealed", "dawn-warning", "veil", "veil-blocked"].includes(event.kind)) announce(event.text);
     }
   }
@@ -805,11 +964,26 @@ class GameScene extends Phaser.Scene {
     const nearby = targetHuman(w), biteTarget = targetHuman(w, 30, true);
     const section = sectionAt(w.level, p.x);
     const nextGate = w.level.gates.find((gate) => gate.x > p.x && gate.x - p.x < 210);
-    const gateHint = nextGate ? gateState(w, nextGate) === "locked" ? "KEY FIRST · THE GATE IS LOCKED" : "NO RETURN · CROSS TO SEAL THIS SECTION" : null;
-    this.hint.setText(w.focus ? "HOLD GLAMOUR · DON'T MOVE" : biteTarget ? `BITE NOW · ${biteTarget.stunned.toFixed(1)}s` : nearby?.state === "stunned" ? "GET CLOSER · BITE BEFORE THEY WAKE" : nearby?.behavior === "priest" && pulseState(w.elapsed, 3.8, nearby.phase) !== "safe" ? "CROSS RAISED · GLAMOUR BLOCKED" : nearby ? "FACE THEM · HOLD GLAMOUR · +2 DIRT" : gateHint || section.hint);
+    const gateHint = nextGate ? gateState(w, nextGate) === "locked" ? "Find this section's key to open the gate." : "NO RETURN · The gate will close behind you." : null;
+    const target = biteTarget || nearby;
+    let actionHint = gateHint || section.hint;
+    if (w.focus) actionHint = "Keep holding Glamour (E) until the bar fills.";
+    else if (target) {
+      if (!p.grounded) actionHint = "Land beside them before using Glamour or Bite.";
+      else if (Math.abs(p.y - target.y) >= 18) actionHint = "Get onto the same level as them first.";
+      else if ((target.x - p.x) * p.facing < 0) actionHint = "Turn toward them first.";
+      else if (target.state === "stunned") actionHint = biteTarget ? `Press Bite (F) before they recover: ${target.stunned.toFixed(1)}s` : "Move closer, then press Bite (F).";
+      else if (target.behavior === "priest" && pulseState(w.elapsed, 3.8, target.phase) !== "safe") actionHint = "Wait for the priest to lower his cross.";
+      else if (Math.abs(p.vx) >= 24) actionHint = "Stop moving before holding Glamour (E).";
+      else if (w.stunCooldown > 0) actionHint = "Glamour is recharging. Wait a moment.";
+      else if (!canGlamour(w, target)) actionHint = "Move closer to use Glamour (E).";
+      else actionHint = "Hold Glamour (E) until the bar fills.";
+    }
+    this.hint.setText(actionHint);
     this.stunButton.bg.setAlpha(canGlamour(w, nearby) && w.stunCooldown === 0 ? 1 : 0.5);
     this.biteButton.bg.setAlpha(biteTarget ? 1 : 0.5);
     this.moveButtons.forEach(({ bg, direction }) => bg.setFillStyle([...this.held.values()].includes(direction) ? 0x384756 : C.panel));
+    if (w.hunt) this.renderHunt();
   }
   renderEncounters() {
     const w = this.world, g = this.dynamicGraphic;
@@ -884,10 +1058,36 @@ class GameScene extends Phaser.Scene {
       step(this.world, { move, stun: key("E") || key("J") || this.glamourHeld.size > 0, ...this.pending }, STEP);
       this.pending = {}; this.accumulator -= STEP;
     }
-    if (this.world.status === "playing") Sfx.tick(this.world.level.duration - this.world.timeLeft, this.world.timeLeft);
+    if (this.world.status === "playing") Sfx.tick(this.world.level.duration - this.world.timeLeft, this.world.timeLeft, this.world.hunt?.phase === "escape");
     this.showEvents(); this.renderWorld();
     if (this.world.status === "safe") this.completeNight();
     else if (this.world.status === "dead") this.showSunrise();
+  }
+}
+
+class HuntEndScene extends Phaser.Scene {
+  constructor() { super("HuntEnd"); }
+  init(data) { this.result = data; }
+  create() {
+    const { world: w, won, reason } = this.result, h = w.hunt;
+    vignette(this); Sfx.stop(); Sfx.play(won ? "safe" : "dead");
+    label(this, 195, 77, won ? "THE SEAL IS HOME" : "THE CITY REMEMBERS", 12, "#dfb778", true).setOrigin(0.5);
+    label(this, 195, 126, won ? VampHunt.result(w) : "Not this night.", won ? 24 : 33).setOrigin(0.5).setWordWrapWidth(345).setAlign("center");
+    label(this, 195, 398, won ? "You changed the night." : "There is another way through.", 25).setOrigin(0.5);
+    const story = won ? [
+      h.lampsOut ? "The lamplighter put out the streetlights." : "The streetlights stayed on.",
+      h.bridgeOpen ? "The watchman opened the rooftop bridge." : "You escaped without the watchman's bridge.",
+      h.bellCut ? "Your coven silenced the bell." : "You escaped with the bell still ringing.",
+    ].join("\n\n") : `${reason || w.reason}\n\n${h.phase === "escape" ? "The lower roofs don't require Swarm.\nNext time, recruit the bellringer to slow the fire." : "Try the rooftops to avoid the guards,\nor recruit the lamplighter to turn off the lights."}`;
+    label(this, 195, 448, story, 16, "#b8c5cf").setOrigin(0.5, 0).setWordWrapWidth(330).setAlign("center").setLineSpacing(5);
+    label(this, 195, 620, `${w.score.toLocaleString()} POINTS · ${h.allies} ALLIES`, 12, "#dfb778", true).setOrigin(0.5);
+    this.leaving = false;
+    const retry = () => { if (!this.leaving) { this.leaving = true; this.scene.start("Game", { mode: "bellkeeper", profile: Save.progress(), seed: w.seed }); } };
+    button(this, 195, 693, 330, "HUNT AGAIN", retry, true);
+    button(this, 195, 757, 330, "BACK TO THE CITY", () => { if (!this.leaving) { this.leaving = true; this.scene.start("Menu"); } });
+    onKey(this, "keydown-ENTER", retry);
+    this.events.once("shutdown", () => Sfx.stop());
+    announce(`${won ? VampHunt.result(w) : "The hunt is over."} ${story}`);
   }
 }
 
@@ -895,6 +1095,11 @@ class BatScene extends Phaser.Scene {
   constructor() { super("Bat"); }
   init(data = {}) { this.runData = data; }
   fixed(object, depth = 50) { return object.setScrollFactor(0).setDepth(depth); }
+  control(...args) {
+    const item = button(this, ...args);
+    this.fixed(item.bg, 60); this.fixed(item.caption, 61);
+    return item;
+  }
   create() {
     this.flight = VampBat.createFlight(this.runData);
     this.paused = false; this.transitioning = false; this.accumulator = 0;
@@ -914,21 +1119,22 @@ class BatScene extends Phaser.Scene {
     this.clock = this.fixed(label(this, 20, 53, "", 18, "#eee5d3", true));
     this.statusText = this.fixed(label(this, 20, 89, "", 11, "#90d9bf", true));
     this.phaseText = this.fixed(label(this, 195, 132, "Reach the open window.", 20).setOrigin(0.5));
-    this.note = this.fixed(label(this, 195, 166, "Hold to rise. Release to descend.", 12, "#acbdc9").setOrigin(0.5));
+    this.note = this.fixed(label(this, 195, 166, "You fly right automatically.", 12, "#acbdc9").setOrigin(0.5).setWordWrapWidth(330).setAlign("center"));
     this.concern = this.fixed(label(this, 195, 240, "", 17).setOrigin(0.5).setWordWrapWidth(345).setAlign("center"));
     this.feedback = this.fixed(label(this, 195, 510, "", 13, "#dfb778").setOrigin(0.5).setWordWrapWidth(340).setAlign("center"));
     this.focusBar = this.fixed(this.add.rectangle(45, 565, 300, 5, C.mint).setOrigin(0, 0.5));
     this.focusBar.setVisible(false);
     this.fixed(this.add.rectangle(195, 738, 390, 212, C.ink, 0.97));
-    this.flap = button(this, 195, 715, 330, "HOLD TO FLAP · SPACE", () => Sfx.unlock(), true);
+    this.flap = this.control(195, 715, 330, "HOLD TO RISE · SPACE / ↑", () => Sfx.unlock(), true);
     this.flap.bg.on("pointerdown", p => { if (!this.paused) this.held.add(p.id); });
     this.flap.bg.on("pointerout", p => this.held.delete(p.id));
-    this.glamour = button(this, 195, 615, 330, "HOLD GLAMOUR · E", () => Sfx.unlock(), true);
+    this.flightHelp = this.fixed(label(this, 195, 778, "Hold SPACE / ↑ to rise.\nRelease to descend.", 14, "#acbdc9").setOrigin(0.5).setAlign("center").setLineSpacing(8), 61);
+    this.glamour = this.control(195, 615, 330, "HOLD GLAMOUR · E", () => Sfx.unlock(), true);
     this.glamour.bg.on("pointerdown", p => { if (!this.paused) this.held.add(p.id); });
     this.glamour.bg.on("pointerout", p => this.held.delete(p.id));
     this.glamour.bg.setVisible(false).disableInteractive(); this.glamour.caption.setVisible(false);
-    this.choices = f.resident.choices.map((choice, index) => button(this, 195, 680 + index * 59, 350, `${index + 1}. ${choice[1]}`, () => this.choose(index)));
-    this.choices.forEach(b => { b.bg.setVisible(false).disableInteractive(); b.caption.setVisible(false).setWordWrapWidth(325); });
+    this.choices = f.resident.choices.map((choice, index) => this.control(195, 680 + index * 59, 350, `${index + 1}. ${choice[1]}`, () => this.choose(index)));
+    this.choices.forEach(b => { b.bg.setVisible(false).disableInteractive(); b.caption.setVisible(false).setWordWrapWidth(325).setAlign("center"); });
     const pause = button(this, 344, 57, 52, "Ⅱ", () => this.paused ? this.resumeGame() : this.pauseGame());
     [pause.bg, pause.caption].forEach(o => this.fixed(o, 95));
     this.keys = this.input.keyboard.addKeys("SPACE,UP,W,Z,E,J");
@@ -948,7 +1154,7 @@ class BatScene extends Phaser.Scene {
       this.input.removeAllListeners(); this.held.clear(); this.input.keyboard.resetKeys(); Sfx.stop();
     });
     this.renderFlight();
-    announce(`Night ${f.night}. You are a bat. Hold Space or Flap to rise, release to descend. Reach the window and earn an invitation.`);
+    announce(`Night ${f.night}. You fly right automatically. Hold Space, Up or the rise button to fly higher; release to descend. At the window, hold E or Glamour while the resident is calm, then tap a promise or press 1, 2 or 3.`);
   }
   choose(index) { if (!this.paused && !this.transitioning) VampBat.choose(this.flight, index); }
   pauseGame() {
@@ -991,21 +1197,25 @@ class BatScene extends Phaser.Scene {
     bat.fillStyle(0xf486a0); bat.fillCircle(b.x + 3, b.y - 4, 2);
     const seconds = Math.ceil(f.timeLeft);
     this.clock.setText(`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} TO SUNRISE`);
-    this.statusText.setText(`${f.lives} COFFINS · ${f.profile.dirt} DIRT · SAME NIGHT CLOCK`);
+    this.statusText.setText(`${f.lives} COFFINS · ${f.profile.dirt} DIRT`);
     this.dawn.setAlpha(Math.max(0, 1 - f.timeLeft / f.level.duration - 0.35) * 0.8);
     if (f.status === "window") {
       if (!this.windowShown) {
         this.windowShown = true; this.held.clear();
         this.flap.bg.setVisible(false).disableInteractive(); this.flap.caption.setVisible(false);
+        this.flightHelp.setVisible(false);
         this.glamour.bg.setVisible(true).setInteractive(); this.glamour.caption.setVisible(true);
-        this.choices.forEach(b => { b.bg.setVisible(true).setInteractive(); b.caption.setVisible(true); });
+        this.choices.forEach(b => { b.bg.setVisible(true); b.caption.setVisible(true); });
         this.focusBar.setVisible(true);
       }
       this.phaseText.setText(f.resident.name);
       this.concern.setText(`“${f.resident.concern}”`);
-      this.note.setText(f.invitationLeft > 0 ? `CHOOSE YOUR PROMISE · ${f.invitationLeft.toFixed(1)}s` : VampBat.calm(f) ? "CALM · HOLD GLAMOUR" : "SUSPICIOUS · WAIT FOR THEIR GAZE TO SOFTEN");
+      this.note.setText(f.invitationLeft > 0 ? `Reply: tap an option or press 1, 2, 3 · ${f.invitationLeft.toFixed(1)}s` : VampBat.calm(f) ? "They're calm. Hold Glamour (E)." : "They're nervous. Release Glamour and wait.");
       this.focusBar.setScale(f.invitationLeft > 0 ? f.invitationLeft / 4 : f.focus / 1.1, 1);
-      this.choices.forEach(b => b.bg.setAlpha(f.invitationLeft > 0 ? 1 : 0.4));
+      this.choices.forEach(b => {
+        b.bg.setAlpha(f.invitationLeft > 0 ? 1 : 0.6);
+        if (f.invitationLeft > 0) b.bg.setInteractive(); else b.bg.disableInteractive();
+      });
     }
   }
   update(_time, delta) {
@@ -1336,7 +1546,7 @@ const config = {
   parent: "game",
   input: { activePointers: 3, keyboard: true },
   render: { antialias: true, roundPixels: true },
-  scene: [BootScene, MenuScene, GameScene, BatScene, CryptScene, ScoreScene],
+  scene: [BootScene, MenuScene, GameScene, HuntEndScene, BatScene, CryptScene, ScoreScene],
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
 };
 if (typeof module !== "undefined" && module.exports)
@@ -1344,6 +1554,7 @@ if (typeof module !== "undefined" && module.exports)
     BootScene,
     MenuScene,
     GameScene,
+    HuntEndScene,
     BatScene,
     CryptScene,
     ScoreScene,

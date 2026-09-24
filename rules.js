@@ -2,6 +2,7 @@
 (function (root) {
   "use strict";
   const Levels = typeof module !== "undefined" && module.exports ? require("./levels") : root.VampLevels;
+  const Hunt = typeof module !== "undefined" && module.exports ? require("./hunt") : root.VampHunt;
   const { FLOOR, CAMPAIGN, nightSettings, sectionAt, buildLevel } = Levels;
   const GRAVITY = 1450, JUMP_SPEED = 600, PLAYER_SPEED = 220;
   const MAX_LIVES = 3, GARLIC_HITS_PER_LIFE = 3, STEP = 1 / 120, COFFIN_COST = 32;
@@ -35,7 +36,7 @@
     return true;
   }
   function createWorld(data = {}) {
-    const level = buildLevel(data.nightNumber, integer(data.seed, 1));
+    const level = data.mode === "bellkeeper" ? Hunt.buildLevel(integer(data.seed, 1)) : buildLevel(data.nightNumber, integer(data.seed, 1));
     return {
       level, profile: cleanProgress(data.profile), night: level.night, seed: level.seed,
       timeLeft: Number.isFinite(data.timeLeft) ? clamp(data.timeLeft, 0, level.duration) : level.duration, score: integer(data.score), lives: clamp(integer(data.lives, MAX_LIVES), 1, MAX_LIVES), garlicHits: 0,
@@ -44,6 +45,7 @@
       coyote: 0.12, jumpBuffer: 0, stunCooldown: 0, elapsed: 0, keys: 0,
       stats: { blood: 0, turned: 0, dirt: 0, lost: 0, glamoured: 0, glamourDirt: 0 }, events: [], projectiles: [],
       veil: false, feeds: 0, focus: null,
+      hunt: data.mode === "bellkeeper" ? Hunt.createState() : null,
       lastSection: -1, gateMessageAt: -10,
     };
   }
@@ -58,7 +60,9 @@
   }
   function hurt(world, kind) {
     if (world.status !== "playing" || world.invulnerable > 0 || (world.iv > 0 && kind !== "fall")) return false;
+    if (world.hunt?.dash > 0 && kind === "garlic") return false;
     interruptGlamour(world);
+    if (world.hunt) world.hunt.sealFocus = 0;
     if (world.veil && kind !== "fall") {
       world.veil = false; world.invulnerable = 0.8;
       world.events.push({ kind: "veil-blocked", text: "Shadow veil absorbed the hit." });
@@ -75,6 +79,7 @@
   }
   function collect(world, pickup) {
     if (!pickup.active || world.status !== "playing") return false;
+    if (world.hunt && pickup.kind === "key" && !world.hunt.sealReady) return false;
     pickup.active = false;
     let text;
     if (pickup.kind === "dirt") {
@@ -85,12 +90,13 @@
       world.stats.blood++; world.score += 100; text = "Blood +100 · garlic healed";
     } else if (pickup.kind === "key") {
       world.keys++; world.score += 200;
-      text = world.keys === world.level.requiredKeys ? "All keys found. The crypt is open!" : `Crypt key ${world.keys}/${world.level.requiredKeys}`;
+      text = world.hunt ? "Seal taken. Get to the crypt." : world.keys === world.level.requiredKeys ? "All keys found. The crypt is open!" : `Crypt key ${world.keys}/${world.level.requiredKeys}`;
     } else {
       world.iv = 6 + 2 * world.profile.upgrades.iv; world.score += 150;
       text = "IV rush · protected + faster";
     }
     world.events.push({ kind: pickup.kind, text, x: pickup.x, y: pickup.y });
+    if (world.hunt) Hunt.onCollect(world, pickup);
     return true;
   }
   function targetHuman(world, range = 78, stunnedOnly = false) {
@@ -104,14 +110,14 @@
   function interruptGlamour(world) {
     if (!world.focus) return;
     world.focus = null; world.stunCooldown = Math.max(world.stunCooldown, 0.35);
-    world.events.push({ kind: "focus-lost", text: "Focus broken. Face them, hold still and try again." });
+    world.events.push({ kind: "focus-lost", text: "Glamour interrupted." });
   }
   function stun(world) {
     if (world.status !== "playing" || world.stunCooldown > 0 || world.focus) return false;
     const h = targetHuman(world);
     if (!canGlamour(world, h)) return false;
     world.focus = { id: h.id, elapsed: 0, duration: h.behavior === "priest" ? 1.25 : h.behavior === "hunter" ? 1 : 0.75 };
-    world.events.push({ kind: "focus", text: "Hold glamour. Stay still and keep them in sight." });
+    world.events.push({ kind: "focus", text: "Keep holding Glamour until the bar fills." });
     return true;
   }
   function updateGlamour(world, input, dt) {
@@ -130,7 +136,7 @@
       h.glamourRewarded = true; world.stats.glamoured++;
       world.profile.dirt += reward; world.stats.glamourDirt += reward;
     }
-    world.events.push({ kind: "stun", text: `Glamoured${reward ? ` · +${reward} dirt` : ""}. Get close and bite.`, x: h.x, y: h.y });
+    world.events.push({ kind: "stun", text: `They're glamoured. Get close and press Bite (F).${reward ? `\n+${reward} grave dirt` : ""}`, x: h.x, y: h.y });
   }
   function bite(world) {
     if (world.status !== "playing") return false;
@@ -143,11 +149,13 @@
     world.garlicHits = Math.max(0, world.garlicHits - 1);
     world.feeds++;
     world.score += points;
-    world.events.push({ kind: "bite", text: `+${points} pts · +${reward} dirt${healed ? " · garlic healed" : ""}\nFeed ${world.feeds}/${FEEDS_PER_VEIL} toward a shadow veil`, x: h.x, y: h.y });
+    const bitesLeft = FEEDS_PER_VEIL - world.feeds;
+    world.events.push({ kind: "bite", text: `+${points} pts · +${reward} dirt${healed ? " · 1 garlic wound healed" : ""}\n${bitesLeft ? `${bitesLeft} more ${bitesLeft === 1 ? "bite" : "bites"} for a protective veil` : "Protective veil earned."}`, x: h.x, y: h.y });
     if (world.feeds === FEEDS_PER_VEIL) {
       world.feeds = 0; world.veil = true;
       world.events.push({ kind: "veil", text: "SHADOW VEIL · next garlic or cross hit blocked" });
     }
+    if (world.hunt) Hunt.onBite(world, h);
     return true;
   }
   function advanceClock(world, seconds) {
@@ -179,12 +187,12 @@
     world.contracts.forEach((contract, i) => {
       if (contract.complete) {
         world.contractReward += contract.reward;
-        world.profile.medals[world.level.chapter] |= 1 << i;
+        if (!world.hunt) world.profile.medals[world.level.chapter] |= 1 << i;
         world.score += 250;
       }
     });
     world.profile.dirt += world.contractReward;
-    world.profile.bestNight = Math.max(world.profile.bestNight, world.night);
+    if (!world.hunt) world.profile.bestNight = Math.max(world.profile.bestNight, world.night);
     world.score += bonus; world.bonus = bonus; world.status = "safe";
     world.player.vx = world.player.vy = 0;
     world.events.push({ kind: "safe", text: "The crypt is yours." });
@@ -268,7 +276,7 @@
       }
       if (h.state === "vampire") continue;
       if (h.behavior === "hunter") {
-        h.cooldown = Math.max(0, h.cooldown - dt);
+        h.cooldown = Math.max(0, h.cooldown - dt * (world.hunt?.alarm ? 1.35 : 1));
         if (h.windup > 0) {
           h.windup = Math.max(0, h.windup - dt);
           if (!h.windup) {
@@ -277,7 +285,7 @@
           }
           continue;
         }
-        if (!h.cooldown && Math.abs(p.x - h.x) < 370 && Math.abs(p.y - h.y) < 95) {
+        if (!h.cooldown && Math.abs(p.x - h.x) < 370 && Math.abs(p.y - h.y) < 95 && (!world.hunt || Hunt.sees(world, h))) {
           h.windup = 0.85; h.aim = Math.sign(p.x - h.x) || 1; h.direction = h.aim;
           continue;
         }
@@ -305,16 +313,18 @@
     world.elapsed += dt; advanceClock(world, dt);
     if (world.status !== "playing") return;
     for (const key of ["iv", "invulnerable", "jumpBuffer", "stunCooldown"]) world[key] = Math.max(0, world[key] - dt);
+    if (world.hunt) Hunt.beginStep(world, input, dt);
     updatePlatforms(world, dt);
     world.coyote = p.grounded ? 0.12 : Math.max(0, world.coyote - dt);
     if (input.jump) world.jumpBuffer = 0.14;
-    updateGlamour(world, input, dt);
-    if (input.bite) bite(world);
+    updateGlamour(world, world.hunt?.dash > 0 ? {} : input, dt);
+    if (input.bite && !(world.hunt?.dash > 0)) bite(world);
     const direction = clamp(input.move || 0, -1, 1);
     const speed = (PLAYER_SPEED + world.profile.upgrades.stride * 18) * (world.iv > 0 ? 1.18 : 1);
     const desired = direction * speed, acceleration = (direction ? 1800 : 2200) * dt;
     p.vx += clamp(desired - p.vx, -acceleration, acceleration);
     if (direction) p.facing = Math.sign(direction);
+    if (world.hunt?.dash > 0) p.vx = p.facing * Hunt.DASH_SPEED;
     if (world.jumpBuffer > 0 && world.coyote > 0) {
       p.vy = -JUMP_SPEED; p.grounded = false; p.groundId = null;
       world.coyote = world.jumpBuffer = 0; world.events.push({ kind: "jump" });
@@ -322,7 +332,7 @@
     const previousBottom = p.y + p.h;
     p.x = clamp(p.x + p.vx * dt, p.w / 2, world.level.width - p.w / 2);
     updateGates(world);
-    p.vy = Math.min(850, p.vy + GRAVITY * dt); p.y += p.vy * dt;
+    p.vy = Math.min(850, p.vy + GRAVITY * dt * (world.hunt?.dash > 0 ? 0.12 : 1)); p.y += p.vy * dt;
     p.grounded = false; p.groundId = null;
     if (p.vy >= 0) {
       let landing = null;
@@ -338,9 +348,15 @@
       world.invulnerable = 0; hurt(world, "fall");
       p.x = world.checkpoint; p.y = FLOOR - p.h; p.vx = p.vy = 0;
       p.grounded = true; p.groundId = null; world.coyote = world.jumpBuffer = 0;
+      if (world.hunt) {
+        world.hunt.dash = 0;
+        const spot = world.hunt.safeSpot;
+        if (spot && world.level.platforms[spot.groundId].active) Object.assign(p, spot);
+      }
     }
     if (world.status !== "playing") return;
     for (const checkpoint of world.level.checkpoints) {
+      if (world.hunt?.phase === "escape") break;
       if (checkpoint >= world.returnLimit && p.grounded && p.y + p.h === FLOOR && p.x >= checkpoint) world.checkpoint = checkpoint;
     }
     updateHumans(world, dt);
@@ -349,6 +365,8 @@
     }
     if (world.status !== "playing") return;
     for (const pickup of world.level.pickups) if (pickup.active && overlap(p, { x: pickup.x, y: pickup.y - 13, w: 26, h: 26 })) collect(world, pickup);
+    if (world.hunt) Hunt.update(world, input, dt, hurt, lose);
+    if (world.status !== "playing") return;
     const section = sectionAt(world.level, p.x).index;
     if (world.lastSection !== section) {
       if (world.lastSection >= 0) world.events.push({ kind: "section", text: world.level.sections[section].hint });
@@ -357,7 +375,7 @@
     if (p.x >= world.level.crypt.x - 20 && p.y + p.h >= FLOOR - 50 && p.grounded) {
       if (!finishNight(world) && world.elapsed - world.gateMessageAt > 3) {
         world.gateMessageAt = world.elapsed;
-        world.events.push({ kind: "locked", text: `Crypt locked. Find ${world.level.requiredKeys - world.keys} more key${world.level.requiredKeys - world.keys === 1 ? "" : "s"}. Follow the blue arrow.` });
+        world.events.push({ kind: "locked", text: world.hunt ? "You need the seal to enter.\nFollow the arrow back to the altar." : `Crypt locked. Find ${world.level.requiredKeys - world.keys} more key${world.level.requiredKeys - world.keys === 1 ? "" : "s"}. Follow the blue arrow.` });
       }
     }
   }

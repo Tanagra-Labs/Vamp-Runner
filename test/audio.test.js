@@ -5,11 +5,11 @@ const A=require('../audio');
 test('district motifs and key gameplay sounds have distinct, bounded voices and pickup variations',()=>{
   const motifs=Object.keys(A.THEMES).map(key=>JSON.stringify(A.pattern('ambient',key)));
   assert.equal(new Set(motifs).size,8);
-  const kinds=['jump','dirt','syringe','iv','key','focus','stun','bite','veil','veil-blocked','hurt','gate-sealed','dawn-warning','heartbeat','safe','dead'];
+  const kinds=['jump','dirt','syringe','iv','key','focus','stun','bite','veil','veil-blocked','hurt','gate-sealed','dawn-warning','heartbeat','safe','dead','swarm','bell','alarm','consecrate','seal-stolen','coven-born','sabotage','pursuit','witness'];
   assert.equal(new Set(kinds.map(kind=>JSON.stringify(A.pattern(kind)))).size,kinds.length);
   assert.notDeepEqual(A.pattern('dirt','quarter',0),A.pattern('dirt','quarter',1));
   for(const key of Object.keys(A.THEMES)) for(const kind of kinds) for(const n of A.pattern(kind,key)) {
-    assert.ok(n.frequency>20&&n.frequency<2500); assert.ok(n.volume>0&&n.volume<=0.05); assert.ok(n.duration>0&&n.duration<=1);
+    assert.ok(n.frequency>20&&n.frequency<2500); assert.ok(n.volume>0&&n.volume<=0.05); assert.ok(n.duration>0&&n.duration<=1.2);
   }
 });
 

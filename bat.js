@@ -30,8 +30,8 @@
     if (["dead", "invited"].includes(w.status) || !Number.isFinite(seconds) || seconds <= 0) return;
     const before = w.timeLeft;
     w.timeLeft = Math.max(0, w.timeLeft - seconds);
-    for (const threshold of [60, 30, 10]) if (before > threshold && w.timeLeft <= threshold && w.timeLeft > 0) w.events.push({ kind: "dawn-warning", text: `${threshold} seconds to sunrise. The same clock continues inside.` });
-    if (!w.timeLeft) { w.status = "dead"; w.reason = "Sunrise found you outside an invited threshold."; w.events.push({ kind: "dead", text: w.reason }); }
+    for (const threshold of [60, 30, 10]) if (before > threshold && w.timeLeft <= threshold && w.timeLeft > 0) w.events.push({ kind: "dawn-warning", text: `${threshold} seconds until sunrise. Hurry!` });
+    if (!w.timeLeft) { w.status = "dead"; w.reason = "Sunrise caught you outside."; w.events.push({ kind: "dead", text: w.reason }); }
   }
   function hit(w, obstacle) {
     if (w.invulnerable > 0 || w.status !== "flying") return;
@@ -54,7 +54,7 @@
       if (obstacle || b.y < 235 || b.y > 622) hit(w, obstacle);
       if (w.status !== "dead" && b.x >= w.window.x - 32 && Math.abs(b.y - w.window.y) < 45) {
         w.status = "window"; b.y = w.window.y; b.vy = 0;
-        w.events.push({ kind: "key", text: "An open window is not an invitation. Read their concern, then hold glamour while they are calm." });
+        w.events.push({ kind: "key", text: "You need an invitation to enter.\nWhen they're calm, hold Glamour (E)." });
       }
     } else {
       if (w.invitationLeft > 0) {

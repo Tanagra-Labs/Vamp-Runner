@@ -1,6 +1,29 @@
 # Vamp Runner
 
-A mobile vampire platformer from Tanagra Labs. Survive a 12-night campaign across eight districts, find the keys to your crypt before sunrise, and take on harder Blood Moon runs. Fly as a bat, earn invitations, explore underground, and glamour humans before biting them into vampires.
+A mobile vampire platformer from Tanagra Labs. Hunt the Bellkeeper: stalk his street, turn his people, steal his seal and escape the burning roofs. A separate 12-night campaign crosses eight districts, with bat flights, window invitations, underground routes and harder Blood Moon runs.
+
+## Version 1.6: The Bellkeeper
+
+Choose **Hunt the Bellkeeper** on the title screen, or press Enter. This is a complete, replayable featured hunt testing a more connected gameplay loop. The twelve-night campaign remains available from its own button; playing, dying or retrying this hunt preserves an existing campaign checkpoint. Bat-stage frequency and future vampire-development milestones are unchanged.
+
+The approach has two paths: stay on the rooftops above the watch, or stalk the street and build a coven. Stop inside a marked shadow to hide and reduce suspicion. Humans watch in their facing direction; staying in view or feeding in front of another human raises suspicion. Sweeping lanterns expose the street. A full alert wakes the watch and makes hunters attack more often.
+
+**Swarm** turns the vampire into a short burst of bats in the direction they are facing. Jump first to cross a longer gap, then press **V / Shift** or tap **Swarm**. Each burst costs one blood, with a capacity of three. Biting and blood syringes restore one charge. Swarming evades garlic but cannot cross a holy strike safely. All required crossings have a lower route that needs no swarm; the high route trades blood and precise landings for richer caches.
+
+Conversions change the map. The new vampire flies to their task before the effect takes hold:
+
+| Recruit | Consequence |
+| --- | --- |
+| Lamplighter | Extinguishes the sweeping lamps |
+| Watchman | Opens a shadow bridge across the upper escape route |
+| Bellringer or sexton | Silences the bell, delaying and slowing the pursuing ward |
+| Bellkeeper | Stops his targeted cross strikes and silences the bell |
+
+The Bellkeeper marks a column of ground before striking it with his cross. The mark stays where it was placed, giving time to dodge. Beside the altar seal, the Glamour button changes to **Take Seal**. Hold it (or **E**) for 1.5 uninterrupted seconds to take the seal. Moving, jumping, releasing the button or taking a hit breaks concentration. Taking the seal refills blood and starts the escape: the sky warms, bells and a faster pulse sound, and a wall of holy fire follows across the roofs. Silencing the bell delays and slows the fire. A crumbling lower ledge and wide upper crossings create different escape demands.
+
+Falling costs a coffin and restores the last stable roof reached; it does not restore blood or rewind the ward. Outrun the ward and reach the crypt before sunrise. The ending reflects the route taken and the allies recruited, with **Hunt Again** available immediately. Earned dirt persists, but this hunt does not grant campaign challenge marks or unlock nights.
+
+The hunt adds a bell-tower landmark, moving lamp beams, witness cues, flying recruits, a visible swarm transformation, cross telegraphs and a pursuing ward. Motion settings suppress decorative movement and camera shake. New sound voices cover swarms, bells, discovery, consecration, conversions, sabotage and the escape pulse; sound remains optional.
 
 ## Play locally
 
@@ -16,12 +39,14 @@ Open `http://localhost:3000`. Phaser **3.60.0** loads from jsDelivr, requiring i
 
 | Action | Keyboard | Touch |
 | --- | --- | --- |
-| Start / next night / replay | Enter | Named button |
+| Featured hunt / next night / replay | Enter | Named button |
 | Move left / right | Left / Right, A / D, or Q / D | Hold an arrow |
 | Jump | Space, Up, W, or Z | Jump button |
 | Glamour nearby human | Hold E (or J), facing them while stationary | Hold Glamour |
 | Bite glamoured human | F (or K), within close range | Bite button |
-| Fly upward as a bat | Hold Space, Up, W or Z; release to descend | Hold Flap; release to descend |
+| Swarm burst in the Bellkeeper hunt | V or Shift, after jumping for long crossings | Swarm button |
+| Take the Bellkeeper's seal | Stand beside the altar seal and hold E | Hold Take Seal |
+| Fly upward as a bat | Hold Space, Up, W or Z; release to descend | Hold the rise button; release to descend |
 | Glamour a window resident | Hold E (or J) while they are calm | Hold Glamour |
 | Choose an invitation response | 1, 2 or 3 | Named response |
 | Pause / resume | Escape or P | Pause / Resume |
@@ -51,7 +76,9 @@ The sunrise clock shows minutes and seconds, a moving sun marker and a gradually
 
 Nights **9 and 10** descend into the catacombs and undercity sewers, with sixteen new encounters, burial hoists, crumbling bone bridges, pipe crossings, drain ferries, caches and warned garlic vents. Cross-bearing priests appear from night 3 and guard later areas. Their larger crosses visibly lower, rise and burn; glamour only works while the cross is lowered.
 
-The bat stage currently connects **Next Night → flight → window invitation → ground map**. Hold Flap to rise and release to descend through rooftop gaps. A collision costs a coffin and retries near the obstacle. At the window, read the resident's concern, hold glamour through 1.1 seconds of calm, then choose a fitting promise within four seconds. Five residents have different concerns and shuffled responses. A wrong promise costs two seconds; three refusals cost a coffin. An invitation awards **5 dirt and 200 points**, once. Remaining time, coffins, currency and score carry into the ground map; the clock does not restart at the window.
+The bat stage currently connects **Next Night → flight → window invitation → ground map**. The bat flies right automatically. Hold Space, Up or the rise button to fly higher and release to descend through rooftop gaps. A collision costs a coffin and retries near the obstacle. At the window, read the resident's concern and all three promises, hold glamour through 1.1 seconds of calm, then tap a fitting promise or press 1–3 within four seconds. Five residents have different concerns and shuffled responses. A wrong promise costs two seconds; three refusals cost a coffin. An invitation awards **5 dirt and 200 points**, once. Remaining time, coffins, currency and score carry into the ground map; the clock does not restart at the window.
+
+**1.5.1 visibility fix:** the bottom panel covered the bat's flight button and invitation responses. Their backgrounds and captions now render above the panel with fixed screen positions. Promises remain readable before glamour and become selectable once the resident is listening. Regression checks cover panel occlusion, holding and releasing the flight control, and completing every resident's invitation through touch and keyboard input.
 
 **Progression placement is provisional:** bat stages currently run before nights 2 onward for testing. Their eventual placement at defined vampire-development milestones remains a design decision; the mechanics are ready for that later integration.
 
@@ -99,7 +126,7 @@ npm run check
 npm test
 ```
 
-63 tests cover all twelve ground chapters at three seeds with starting abilities; surface cache climbs in both directions and underground caches; a full campaign including bat flights and shared deadlines; five consecutive crypt/flight/invitation/map transitions; five resident concerns, wrong promises and invitation rewards; glamour interruption and anti-farming; conversion healing and veil rules; priest resistance and cross timing; underground vents; sunrise warnings and slow-frame deadlines; distinct sound voices, mute and cleanup; moving platforms; one-way gates; save/resume; input, upgrades, scores and the HTTP server.
+77 tests cover the Bellkeeper's stealth, coven and upper-roof routes; compatibility with earned upgrades; shadows, witnesses and alert consequences; each recruit's sabotage; finite blood and swarm control; seal concentration and cross telegraphs; pursuit failure and roof recovery; visible hunt controls and campaign-save isolation; all twelve ground chapters at three seeds; cache routes; the full campaign with bat flights and shared deadlines; repeated crypt/flight/invitation/map transitions; all resident concerns and visible promise choices; glamour, conversion and veil rules; priests, underground vents, sunrise, audio cleanup, one-way gates, persistence and HTTP assets.
 
 Route tests supply movement and action inputs to the real simulation, without teleporting or granting immunity. Scene tests use a Node adapter and Phaser's scroll-coordinate formula; audio tests use a Web Audio adapter. These checks do not run the actual browser renderer, device input or speakers. Before release, play at phone and desktop sizes: hold glamour and approach to bite, face a priest, fly and earn an invitation, enter an underground district, and check Next Night, save/resume, two-finger controls, sound and reduced motion. The development browser blocks local previews, so visual/device behavior, listening quality and human difficulty tuning still need that playtest.
 
@@ -107,6 +134,7 @@ Route tests supply movement and action inputs to the real simulation, without te
 
 - `game.js`: Phaser scenes, procedural artwork, controls, feedback, crypt shop and menus.
 - `levels.js`: twelve campaign chapters, encounter layouts, seeded variation and challenge goals.
+- `hunt.js`: authored Bellkeeper routes, stealth, swarm, recruit sabotage, altar ritual and pursuit.
 - `rules.js`: the browser-independent platformer simulation, enemy behavior and progression.
 - `bat.js`: flight, resident attention, invitation choices and the shared deadline.
 - `audio.js`: district motifs, event voices and Web Audio lifecycle.

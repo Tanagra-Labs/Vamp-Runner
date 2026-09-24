@@ -1,13 +1,14 @@
 // Scripted keyboard input through the real simulation; no teleports or immunity.
 const R = require('../rules');
 
-function play(w, debug = false, detours = false) {
+function play(w, debug = false, detours = false, options = {}) {
   const route = [];
   for (const section of w.level.sections) {
     for (const id of detours ? section.detour : section.route) route.push({ platform: w.level.platforms[id], section: section.index });
-    route.push({ x: section.end + 35, y: R.FLOOR, w: 45, section: section.index });
+    if (section.exitGround !== false) route.push({ x: section.end + 35, y: R.FLOOR, w: 45, section: section.index });
   }
   route.push({ x: w.level.crypt.x + 5, y: R.FLOOR, w: 40 });
+  if (options.route) route.splice(0, route.length, ...options.route);
   let index = 0, lastLost = 0, maxHeight = R.FLOOR;
   for (let i = 0; i < 120 * w.level.duration && w.status === 'playing'; i++) {
     const p = w.player, goal = route[Math.min(index, route.length - 1)], deck = goal.platform;
@@ -16,7 +17,7 @@ function play(w, debug = false, detours = false) {
     const targetWidth = deck ? deck.w : goal.w;
     let move = Math.abs(targetX - p.x) > 10 ? Math.sign(targetX - p.x) : 0, jump = false;
     const sameDeck = deck ? p.groundId === deck.id : p.y + p.h === R.FLOOR;
-    if (p.grounded && sameDeck && Math.abs(p.x - targetX) < 20) { index++; if(debug)console.log('goal',index,p.x,p.y+p.h,w.elapsed); }
+    if (p.grounded && sameDeck && Math.abs(p.x - targetX) < 20 && !options.waitAtGoal?.(w, goal)) { index++; if(debug)console.log('goal',index,p.x,p.y+p.h,w.elapsed); }
     const current = w.level.platforms.find(x=>x.id === p.groundId);
     if (p.grounded && !sameDeck) {
       let deltaY = targetY - (p.y + p.h), root = 0, flight = 0;
@@ -64,7 +65,7 @@ function play(w, debug = false, detours = false) {
     if (p.grounded && w.projectiles.some(s=>Math.abs(s.x-p.x)<65 && s.vx*(p.x-s.x)>0 && p.y<s.y+15 && p.y+p.h>s.y)) jump=true;
     let focus = false;
     const human = w.level.humans.find(h => h.state !== 'vampire' && h.behavior !== 'hunter' && Math.abs(h.y-p.y)<18 && h.x-p.x>-10 && h.x-p.x<78);
-    if (human && p.grounded) {
+    if (human && p.grounded && !options.ignoreHumans) {
       const distance = human.x-p.x;
       if (human.behavior !== 'priest') {
         jump=false;
@@ -74,7 +75,8 @@ function play(w, debug = false, detours = false) {
     }
     const priest = w.level.humans.find(h=>h.behavior==='priest' && h.state==='human' && h.x-p.x>0 && h.x-p.x<112);
     if (priest && p.grounded) { move=1; jump=true; focus=false; }
-    R.step(w, { move, jump, stun: focus, bite: true });
+    const input = { move, jump, stun: focus, bite: true };
+    R.step(w, options.input ? options.input(w, input, goal) : input);
     maxHeight=Math.min(maxHeight,p.y+p.h);
     if(w.stats.lost>lastLost){
       if(debug)console.log('lost',w.elapsed,p.x,index,w.reason);
